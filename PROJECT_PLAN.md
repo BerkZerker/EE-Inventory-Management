@@ -1,5 +1,19 @@
 # E-Bike Inventory Management System - Implementation Plan
 
+## Progress
+
+- [x] Phase 1: Scaffolding
+- [x] Phase 2: Database Layer
+- [ ] Phase 3: Serial Generator
+- [ ] Phase 4: Invoice Parser (Gemini)
+- [ ] Phase 5: Flask API
+- [ ] Phase 6: React Frontend
+- [ ] Phase 7: Shopify Sync
+- [ ] Phase 8: Barcode Generator
+- [ ] Phase 9: Webhook Listener
+- [ ] Phase 10: CLI Commands
+- [ ] Phase 11: Testing
+
 ## Context
 
 Building the system described in PROJECT_SPEC.md from scratch (no code exists yet, just the spec and a git repo). This plan incorporates spec corrections and technology decisions made during review.
