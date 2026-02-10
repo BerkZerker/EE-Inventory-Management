@@ -37,8 +37,12 @@ class _MockSettings:
     """Minimal settings stub for Shopify tests."""
 
     shopify_store_url = "test.myshopify.com"
+    shopify_client_id = ""
+    shopify_client_secret = ""
     shopify_access_token = "shpat_test_token"
     shopify_api_version = "2025-10"
+    shopify_webhook_secret = ""
+    serial_prefix = "BIKE"
     database_path = ":memory:"
 
 
@@ -76,6 +80,10 @@ def _good_extensions(available: int = 1000) -> dict:
 def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace settings in shopify_sync with test values."""
     monkeypatch.setattr("services.shopify_sync.settings", _MockSettings())
+    # Reset token cache between tests
+    from services.shopify_sync import _token_cache
+    _token_cache["access_token"] = None
+    _token_cache["expires_at"] = 0.0
 
 
 @pytest.fixture(autouse=True)

@@ -18,7 +18,9 @@ class Config(BaseModel):
 
     # Shopify
     shopify_store_url: str = ""
-    shopify_access_token: str = ""
+    shopify_client_id: str = ""
+    shopify_client_secret: str = ""
+    shopify_access_token: str = ""  # legacy static token or auto-managed
     shopify_api_version: str = "2025-10"
     shopify_webhook_secret: str = ""
 
@@ -48,6 +50,8 @@ class Config(BaseModel):
         """Build config from environment variables."""
         return cls(
             shopify_store_url=os.getenv("SHOPIFY_STORE_URL", ""),
+            shopify_client_id=os.getenv("SHOPIFY_CLIENT_ID", ""),
+            shopify_client_secret=os.getenv("SHOPIFY_CLIENT_SECRET", ""),
             shopify_access_token=os.getenv("SHOPIFY_ACCESS_TOKEN", ""),
             shopify_api_version=os.getenv("SHOPIFY_API_VERSION", "2025-10"),
             shopify_webhook_secret=os.getenv("SHOPIFY_WEBHOOK_SECRET", ""),

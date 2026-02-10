@@ -26,6 +26,8 @@ export interface Invoice {
   approved_by: string | null;
   approved_at: string | null;
   created_at: string;
+  items?: InvoiceItem[];
+  preview_serials?: string[];
 }
 
 /** Parsed invoice line item. */
@@ -56,6 +58,12 @@ export interface Bike {
   shopify_order_id: string | null;
   notes: string | null;
   created_at: string;
+  /* joined fields from list_bikes */
+  sku?: string;
+  model_name?: string;
+  color?: string;
+  size?: string;
+  retail_price?: number;
 }
 
 /** Aggregated per-product inventory summary. */
@@ -63,7 +71,32 @@ export interface InventorySummary {
   product_id: number;
   sku: string;
   model_name: string;
-  total: number;
+  retail_price: number;
+  total_bikes: number;
   available: number;
   sold: number;
+  returned: number;
+  damaged: number;
+  avg_cost: number | null;
+}
+
+/** Profit report summary. */
+export interface ProfitSummary {
+  units_sold: number;
+  total_revenue: number;
+  total_cost: number;
+  total_profit: number;
+  margin_pct: number;
+}
+
+/** Per-product profit breakdown. */
+export interface ProfitByProduct {
+  product_id: number;
+  sku: string;
+  model_name: string;
+  units_sold: number;
+  total_revenue: number;
+  total_cost: number;
+  total_profit: number;
+  margin_pct: number;
 }

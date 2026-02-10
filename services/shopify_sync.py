@@ -2,6 +2,11 @@
 
 Handles product sync, variant creation (one per serialised bike),
 inventory management, and reconciliation via the 2025-10 GraphQL API.
+
+Supports both legacy static access tokens (``SHOPIFY_ACCESS_TOKEN``) and
+the new client-credentials grant flow (``SHOPIFY_CLIENT_ID`` +
+``SHOPIFY_CLIENT_SECRET``).  When client credentials are configured the
+module automatically obtains and refreshes 24-hour access tokens.
 """
 
 from __future__ import annotations
@@ -19,6 +24,58 @@ logger = logging.getLogger(__name__)
 
 _cached_location_id: str | None = None
 
+# ---------------------------------------------------------------------------
+# Token management (client-credentials grant)
+# ---------------------------------------------------------------------------
+
+_token_cache: dict[str, object] = {"access_token": None, "expires_at": 0.0}
+
+
+def _obtain_access_token() -> str:
+    """Return a valid Shopify access token.
+
+    If ``SHOPIFY_CLIENT_ID`` and ``SHOPIFY_CLIENT_SECRET`` are set, uses the
+    OAuth 2.0 client-credentials grant to obtain (or refresh) a short-lived
+    token.  Falls back to the static ``SHOPIFY_ACCESS_TOKEN`` if client
+    credentials are not configured.
+    """
+    # Legacy static token path
+    if not settings.shopify_client_id or not settings.shopify_client_secret:
+        if not settings.shopify_access_token:
+            msg = (
+                "Shopify credentials not configured. "
+                "Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, "
+                "or the legacy SHOPIFY_ACCESS_TOKEN."
+            )
+            raise RuntimeError(msg)
+        return settings.shopify_access_token
+
+    # Return cached token if still valid (with 60 s margin)
+    if _token_cache["access_token"] and time.time() < (_token_cache["expires_at"] - 60):  # type: ignore[operator]
+        return _token_cache["access_token"]  # type: ignore[return-value]
+
+    url = f"https://{settings.shopify_store_url}/admin/oauth/access_token"
+    resp = requests.post(
+        url,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": settings.shopify_client_id,
+            "client_secret": settings.shopify_client_secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    token = data["access_token"]
+    expires_in = data.get("expires_in", 86399)
+    _token_cache["access_token"] = token
+    _token_cache["expires_at"] = time.time() + expires_in
+
+    logger.info("Obtained Shopify access token (expires in %ds)", expires_in)
+    return token
+
 
 # ---------------------------------------------------------------------------
 # Core GraphQL helper
@@ -31,12 +88,14 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
     Handles HTTP errors, GraphQL-level errors, and rate-limit back-off.
     Returns the ``data`` dict from the response.
     """
+    access_token = _obtain_access_token()
+
     url = (
         f"https://{settings.shopify_store_url}"
         f"/admin/api/{settings.shopify_api_version}/graphql.json"
     )
     headers = {
-        "X-Shopify-Access-Token": settings.shopify_access_token,
+        "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json",
     }
     body: dict = {"query": query}

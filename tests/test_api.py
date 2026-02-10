@@ -454,14 +454,18 @@ class TestProfitReport:
 
 
 class TestGenerateLabels:
-    def test_returns_501(self, client) -> None:
-        resp = client.post(
-            "/api/labels/generate",
-            json={"serials": ["BIKE-00001", "BIKE-00002"]},
-        )
-        assert resp.status_code == 501
-        data = resp.get_json()
-        assert "not yet available" in data["error"].lower()
+    def test_success(self, client, sample_bike) -> None:
+        with patch("services.barcode_generator.create_label_sheet") as mock_labels:
+            mock_labels.return_value = "/tmp/labels.pdf"
+            resp = client.post(
+                "/api/labels/generate",
+                json={"serials": ["BIKE-00001", "BIKE-00002"]},
+            )
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert data["count"] == 2
+            assert "path" in data
+            mock_labels.assert_called_once()
 
     def test_missing_serials(self, client) -> None:
         resp = client.post(
@@ -470,10 +474,19 @@ class TestGenerateLabels:
         )
         assert resp.status_code == 400
 
+    def test_empty_serials(self, client) -> None:
+        resp = client.post(
+            "/api/labels/generate",
+            json={"serials": []},
+        )
+        assert resp.status_code == 400
+
 
 class TestReconcile:
-    def test_returns_501(self, client) -> None:
+    def test_success_no_mismatches(self, client) -> None:
         resp = client.post("/api/reconcile")
-        assert resp.status_code == 501
+        assert resp.status_code == 200
         data = resp.get_json()
-        assert "not yet available" in data["error"].lower()
+        assert "mismatches" in data
+        assert "total_mismatches" in data
+        assert data["total_mismatches"] == 0

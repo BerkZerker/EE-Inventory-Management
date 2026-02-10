@@ -392,19 +392,72 @@ def profit_report() -> tuple:
 @api_bp.route("/labels/generate", methods=["POST"])
 @handle_errors
 def generate_labels() -> tuple:
-    """Generate shipping labels (not yet implemented)."""
+    """Generate barcode label sheet PDF for a list of serial numbers."""
     data = request.get_json()
     if not data or "serials" not in data:
         return error_response("Request body must include 'serials' list", 400)
 
-    if not isinstance(data["serials"], list):
-        return error_response("'serials' must be a list", 400)
+    if not isinstance(data["serials"], list) or not data["serials"]:
+        return error_response("'serials' must be a non-empty list", 400)
 
-    return error_response("Label generation not yet available", 501)
+    from services.barcode_generator import create_label_sheet
+
+    output_dir = settings.label_output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "labels.pdf")
+
+    create_label_sheet(data["serials"], output_path)
+
+    return jsonify({"path": output_path, "count": len(data["serials"])}), 200
 
 
 @api_bp.route("/reconcile", methods=["POST"])
 @handle_errors
 def reconcile() -> tuple:
-    """Reconciliation (not yet implemented)."""
-    return error_response("Reconciliation not yet available", 501)
+    """Reconcile local inventory with Shopify."""
+    from services.shopify_sync import _graphql_request
+
+    products = models.list_products(g.db)
+    results = []
+
+    for product in products:
+        shopify_pid = product.get("shopify_product_id")
+        if not shopify_pid:
+            continue
+
+        query = """
+        query GetProductVariants($id: ID!) {
+          product(id: $id) {
+            variants(first: 100) {
+              edges { node { id sku } }
+            }
+          }
+        }
+        """
+        try:
+            data = _graphql_request(query, {"id": shopify_pid})
+        except Exception:
+            continue
+
+        shopify_skus = set()
+        for edge in data["product"]["variants"]["edges"]:
+            sku = edge["node"].get("sku", "")
+            if sku.startswith(settings.serial_prefix + "-"):
+                shopify_skus.add(sku)
+
+        local_bikes = models.list_bikes(g.db, product_id=product["id"], status="available")
+        local_serials = {b["serial_number"] for b in local_bikes}
+
+        in_shopify_not_local = sorted(shopify_skus - local_serials)
+        in_local_not_shopify = sorted(local_serials - shopify_skus)
+
+        if in_shopify_not_local or in_local_not_shopify:
+            results.append({
+                "product_id": product["id"],
+                "sku": product["sku"],
+                "model_name": product["model_name"],
+                "in_shopify_not_local": in_shopify_not_local,
+                "in_local_not_shopify": in_local_not_shopify,
+            })
+
+    return jsonify({"mismatches": results, "total_mismatches": len(results)}), 200

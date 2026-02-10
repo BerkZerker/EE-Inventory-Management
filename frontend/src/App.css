@@ -1,42 +1,234 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Sidebar + Main Layout --- */
+.app-layout {
+  display: flex;
+  flex: 1;
+}
+
+/* --- Sidebar Navigation --- */
+.sidebar {
+  width: 220px;
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 1.5rem 0;
+  flex-shrink: 0;
+  min-height: 100vh;
+}
+
+.sidebar-brand {
+  padding: 0 1.25rem 1.5rem;
+  border-bottom: 1px solid #334155;
+  margin-bottom: 1rem;
+}
+.sidebar-brand h1 {
+  font-size: 1.1rem;
+  margin: 0;
+  color: #fff;
+}
+.sidebar-brand p {
+  font-size: 0.75rem;
+  margin: 0.25rem 0 0;
+  color: #94a3b8;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar nav a {
+  display: block;
+  padding: 0.6rem 1.25rem;
+  color: #cbd5e1;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: all 0.15s;
+}
+.sidebar nav a:hover {
+  background: #334155;
+  color: #fff;
+  text-decoration: none;
+}
+.sidebar nav a.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* --- Main Content --- */
+.main-content {
+  flex: 1;
   padding: 2rem;
-  text-align: center;
+  overflow-y: auto;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+.page-header {
+  margin-bottom: 1.5rem;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
+.page-header h2 {
+  font-size: 1.5rem;
+  margin: 0;
 }
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
-
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.page-header p {
+  color: #6b7280;
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
+/* --- Cards --- */
 .card {
-  padding: 2em;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  padding: 1.25rem;
 }
 
-.read-the-docs {
-  color: #888;
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  padding: 1rem 1.25rem;
+}
+.stat-card .label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  margin-bottom: 0.25rem;
+}
+.stat-card .value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* --- Status badges --- */
+.badge {
+  display: inline-block;
+  padding: 0.2em 0.6em;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.badge.available {
+  background: #dcfce7;
+  color: #166534;
+}
+.badge.sold {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.badge.damaged {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.badge.returned {
+  background: #fef3c7;
+  color: #92400e;
+}
+.badge.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+.badge.approved {
+  background: #dcfce7;
+  color: #166534;
+}
+.badge.rejected {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* --- Forms --- */
+.form-group {
+  margin-bottom: 1rem;
+}
+.form-group label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.25rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+/* --- Toolbar --- */
+.toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+/* --- Upload zone --- */
+.upload-zone {
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+}
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.upload-zone p {
+  margin: 0.5rem 0 0;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+.upload-zone .icon {
+  font-size: 2.5rem;
+  color: #9ca3af;
+}
+
+/* --- Loading / Error --- */
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #6b7280;
+}
+
+.error-message {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #6b7280;
+}
+
+/* --- Actions bar --- */
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
 }
