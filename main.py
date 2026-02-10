@@ -36,7 +36,10 @@ def web() -> None:
 @cli.command()
 def sync_products() -> None:
     """Sync product catalogue from Shopify."""
-    print("Not yet implemented")
+    from services.shopify_sync import sync_products_from_shopify
+
+    count = sync_products_from_shopify()
+    print(f"Synced {count} products from Shopify")
 
 
 @cli.command()
@@ -58,7 +61,16 @@ def generate_serials(count: int, sku: str) -> None:
 @click.argument("serials", nargs=-1)
 def print_labels(serials: tuple[str, ...]) -> None:
     """Generate barcode label PDF for the given serial numbers."""
-    print("Not yet implemented")
+    if not serials:
+        print("Usage: print-labels SERIAL [SERIAL ...]")
+        return
+    from pathlib import Path
+
+    from services.barcode_generator import create_label_sheet
+
+    output = str(Path(settings.label_output_dir) / "labels.pdf")
+    create_label_sheet(list(serials), output)
+    print(f"Label sheet saved to {output}")
 
 
 @cli.command()
@@ -86,7 +98,14 @@ def reconcile() -> None:
 @cli.command()
 def webhook() -> None:
     """Start the Shopify webhook listener."""
-    print("Not yet implemented")
+    from webhook_server import create_webhook_app
+
+    app = create_webhook_app()
+    app.run(
+        host=settings.webhook_host,
+        port=settings.webhook_port,
+        debug=False,
+    )
 
 
 if __name__ == "__main__":

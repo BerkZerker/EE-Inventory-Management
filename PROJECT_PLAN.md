@@ -6,11 +6,11 @@
 - [x] Phase 2: Database Layer
 - [x] Phase 3: Serial Generator
 - [x] Phase 4: Invoice Parser (Gemini)
-- [ ] Phase 5: Flask API
+- [x] Phase 5: Flask API (15 endpoints, error handling, tests)
 - [ ] Phase 6: React Frontend
-- [ ] Phase 7: Shopify Sync
-- [ ] Phase 8: Barcode Generator
-- [ ] Phase 9: Webhook Listener
+- [x] Phase 7: Shopify Sync (GraphQL Admin API, product sync, variant creation)
+- [x] Phase 8: Barcode Generator (Code128 PNG, Avery 5160 PDF, thermal labels)
+- [x] Phase 9: Webhook Listener (HMAC verification, dedup, order processing)
 - [ ] Phase 10: CLI Commands
 - [ ] Phase 11: Testing
 

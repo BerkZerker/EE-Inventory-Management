@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from api.app import create_app
 from database.models import (
     create_bike,
     create_invoice,
@@ -17,6 +18,26 @@ from database.models import (
 )
 
 _SCHEMA_PATH = Path(__file__).resolve().parent.parent / "database" / "schema.sql"
+
+
+class _NoCloseConnection:
+    """Wrapper around a sqlite3.Connection that ignores .close() calls.
+
+    This prevents teardown handlers from closing the shared in-memory
+    test fixture.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        object.__setattr__(self, "_conn", conn)
+
+    def close(self) -> None:  # noqa: D102
+        pass  # intentionally do nothing
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        setattr(self._conn, name, value)
 
 
 @pytest.fixture
@@ -103,3 +124,15 @@ def sample_bike(
         actual_cost=800.00,
         date_received="2024-01-20",
     )
+
+
+@pytest.fixture
+def client(db, monkeypatch):
+    """Flask test client using the shared in-memory database."""
+    wrapper = _NoCloseConnection(db)
+    monkeypatch.setattr("api.routes.get_db", lambda _path: wrapper)
+    monkeypatch.setattr("services.serial_generator.get_db", lambda _path: wrapper)
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        yield c
