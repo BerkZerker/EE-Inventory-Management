@@ -6,14 +6,14 @@ Building the system described in PROJECT_SPEC.md from scratch (no code exists ye
 
 ## Key Decisions
 
-| Decision | Choice |
-|----------|--------|
-| Frontend | Vite + React + TypeScript (SPA) |
-| Backend | Flask REST API (JSON) |
-| AI parsing | Google Gemini (`google-genai` SDK) |
-| Barcode format | Code128 |
-| Serial start | Configurable via `STARTING_SERIAL` env var |
-| Shopify API | GraphQL Admin API (REST is legacy as of April 2025) |
+| Decision       | Choice                                              |
+| -------------- | --------------------------------------------------- |
+| Frontend       | Vite + React + TypeScript (SPA)                     |
+| Backend        | Flask REST API (JSON)                               |
+| AI parsing     | Google Gemini (`google-genai` SDK)                  |
+| Barcode format | Code128                                             |
+| Serial start   | Configurable via `STARTING_SERIAL` env var          |
+| Shopify API    | GraphQL Admin API (REST is legacy as of April 2025) |
 
 ## Spec Corrections
 
@@ -30,7 +30,7 @@ These issues in PROJECT_SPEC.md are fixed in this plan:
 
 ## Architecture
 
-```
+```text
 Flask API (:5000)  <-- serves -->  React SPA (Vite dev :5173, prod: built static)
      |
      ├── /api/invoices/*        (upload, parse, review, approve)
@@ -46,7 +46,7 @@ Webhook Listener (:5001)        (separate Flask process)
 
 ## Project Structure
 
-```
+```text
 EE-Inventory-Management/
 ├── .gitignore
 ├── .env.example
@@ -88,31 +88,39 @@ EE-Inventory-Management/
 ## Implementation Phases
 
 ### Phase 1: Scaffolding
+
 Create: `.gitignore`, `requirements.txt`, `.env.example`, `config.py`, `database/schema.sql`, directory structure with `__init__.py` files, `data/` dirs with `.gitkeep`.
 
 **requirements.txt** (key deps):
+
 - `flask==3.1.2`, `flask-cors==5.0.1`
 - `google-genai>=1.62.0` (NOT google-generativeai)
 - `python-barcode[images]==0.15.1`, `reportlab==4.2.5`
 - `pydantic==2.10.6`, `python-dotenv==1.0.1`, `requests==2.32.3`
 
 ### Phase 2: Database Layer
+
 Create `database/models.py` with all CRUD operations. Add `init-db` command to `main.py`. Key functions: product CRUD, invoice + items CRUD, bike lifecycle, webhook log, profit reporting, inventory summary.
 
 SQLite config: WAL mode, foreign keys ON, `row_factory = sqlite3.Row`.
 
 ### Phase 3: Serial Generator
+
 Create `services/serial_generator.py`. Uses `BEGIN IMMEDIATE` for atomic counter increment. Functions: `generate_serial_numbers(count)`, `peek_next_serial()`, `peek_next_serials(count)`.
 
 ### Phase 4: Invoice Parser (Gemini)
+
 Create `services/invoice_parser.py`. Uses `google-genai` SDK with Pydantic structured output (`response_schema=ParsedInvoice`). Upload PDF directly via `client.files.upload()`. Includes:
+
 - `parse_invoice_pdf(pdf_path)` — main parsing function
 - `allocate_costs(items, shipping, discount)` — proportional cost allocation with rounding remainder on last item
 - `match_to_catalog(item, catalog)` — fuzzy SKU matching (model + color + size)
 - `parse_invoice_with_retry()` — exponential backoff
 
 ### Phase 5: Flask API
+
 Create `api/app.py` (factory) and `api/routes.py` (Blueprint under `/api`). Key endpoints:
+
 - `POST /api/invoices/upload` — upload PDF, parse with Gemini, save to DB
 - `GET /api/invoices/:id` — get invoice with items and preview serials
 - `PUT /api/invoices/:id/items/:item_id` — edit parsed line item
@@ -128,9 +136,11 @@ Create `api/app.py` (factory) and `api/routes.py` (Blueprint under `/api`). Key 
 CORS enabled for `localhost:5173` (Vite dev server). In production, Flask serves the built React app at `/`.
 
 ### Phase 6: React Frontend
+
 Init with `npm create vite@latest -- --template react-ts`. Install `axios`, `react-router-dom`. Proxy `/api` to Flask in `vite.config.ts`.
 
 **Pages:**
+
 - **UploadPage** — drag-drop PDF upload, parsing spinner, redirect to review
 - **InvoiceListPage** — table of invoices with status filter tabs
 - **ReviewPage** (most complex) — editable line items table, SKU selector dropdown, "Create New Product" modal for unmatched items, serial preview, cost allocation display, approve/reject buttons, post-approval result with label download
@@ -139,7 +149,9 @@ Init with `npm create vite@latest -- --template react-ts`. Install `axios`, `rea
 - **ReportPage** — date range picker, profit summary, per-product breakdown
 
 ### Phase 7: Shopify Sync
+
 Create `services/shopify_sync.py`. All GraphQL, no REST. Key operations:
+
 - `sync_products_from_shopify()` — paginated product import
 - `create_variants_for_bikes(bikes, product)` — uses `productVariantsBulkCreate` mutation with `barcode`, `inventoryItem.cost`, `inventoryItem.sku`, `inventoryQuantities`
 - `ensure_serial_option(product_id)` — add "Serial" option to product if missing
@@ -147,23 +159,28 @@ Create `services/shopify_sync.py`. All GraphQL, no REST. Key operations:
 - Rate limit handling with exponential backoff on 429
 
 ### Phase 8: Barcode Generator
+
 Create `services/barcode_generator.py`. Uses `python-barcode` (Code128) + `reportlab`. Functions:
+
 - `generate_barcode_image(serial)` — PNG bytes
 - `create_label_sheet(serials, output_path)` — Avery 5160 compatible PDF (3x10 grid)
 - `create_single_label(serial)` — 2"x1" thermal printer label
 
 ### Phase 9: Webhook Listener
+
 Create `webhook_server.py` (separate Flask process on port 5001). HMAC-SHA256 signature verification. `orders/create` handler: verify signature, deduplicate via `webhook_log`, mark bikes as sold. Always returns 200 to Shopify (errors logged, not raised).
 
 ### Phase 10: CLI Commands
+
 Complete `main.py` with all subcommands: `init-db`, `web`, `sync-products`, `receive-invoice`, `generate-serials`, `print-labels`, `inventory`, `report`, `reconcile`, `webhook`.
 
 ### Phase 11: Testing
+
 `pytest` with fixtures for test DB, sample products/invoices. Test suites: serial generation (concurrency), cost allocation (rounding), database CRUD, Shopify sync (mocked), webhook handling (HMAC, dedup), integration (full receive + sell flow).
 
 ## Dependency Order
 
-```
+```text
 Phase 1 → Phase 2 → Phase 3, 4, 7, 8, 9 (parallel)
                          ↓
                      Phase 5 (needs 3 + 4)

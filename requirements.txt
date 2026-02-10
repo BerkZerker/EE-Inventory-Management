@@ -1,0 +1,11 @@
+# Auto-generated lockfile. Regenerate with:
+#   uv pip compile pyproject.toml -o requirements.txt
+flask==3.1.2
+flask-cors==5.0.1
+google-genai>=1.62.0
+python-barcode[images]==0.15.1
+reportlab==4.2.5
+pydantic==2.10.6
+python-dotenv==1.0.1
+requests==2.32.3
+click>=8.1.0
