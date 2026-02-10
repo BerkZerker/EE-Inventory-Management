@@ -4,8 +4,8 @@
 
 - [x] Phase 1: Scaffolding
 - [x] Phase 2: Database Layer
-- [ ] Phase 3: Serial Generator
-- [ ] Phase 4: Invoice Parser (Gemini)
+- [x] Phase 3: Serial Generator
+- [x] Phase 4: Invoice Parser (Gemini)
 - [ ] Phase 5: Flask API
 - [ ] Phase 6: React Frontend
 - [ ] Phase 7: Shopify Sync
