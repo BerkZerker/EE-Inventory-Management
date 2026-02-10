@@ -341,6 +341,107 @@ def reconcile() -> None:
 
 
 @cli.command()
+@click.argument("callback_url")
+def register_webhook(callback_url: str) -> None:
+    """Register the orders/create webhook with Shopify.
+
+    CALLBACK_URL is the public HTTPS endpoint, e.g.
+    https://abc123.ngrok-free.app/webhooks/orders/create
+    """
+    from services.shopify_sync import _graphql_request
+
+    mutation = """
+    mutation webhookSubscriptionCreate(
+        $topic: WebhookSubscriptionTopic!,
+        $webhookSubscription: WebhookSubscriptionInput!
+    ) {
+      webhookSubscriptionCreate(
+          topic: $topic,
+          webhookSubscription: $webhookSubscription
+      ) {
+        webhookSubscription {
+          id
+          topic
+          endpoint {
+            __typename
+            ... on WebhookHttpEndpoint {
+              callbackUrl
+            }
+          }
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+
+    data = _graphql_request(mutation, {
+        "topic": "ORDERS_CREATE",
+        "webhookSubscription": {"uri": callback_url},
+    })
+
+    result = data["webhookSubscriptionCreate"]
+    if result["userErrors"]:
+        print("Failed to register webhook:")
+        for err in result["userErrors"]:
+            print(f"  {err['field']}: {err['message']}")
+        return
+
+    sub = result["webhookSubscription"]
+    print(f"Webhook registered successfully!")
+    print(f"  ID:    {sub['id']}")
+    print(f"  Topic: {sub['topic']}")
+    endpoint = sub.get("endpoint", {})
+    if endpoint.get("callbackUrl"):
+        print(f"  URL:   {endpoint['callbackUrl']}")
+
+    print("\nNote: The webhook signing secret is tied to your app's Client Secret.")
+    print(f"Set SHOPIFY_WEBHOOK_SECRET in .env to your Client Secret value.")
+
+
+@cli.command()
+def list_webhooks() -> None:
+    """List currently registered webhooks on Shopify."""
+    from services.shopify_sync import _graphql_request
+
+    query = """
+    query {
+      webhookSubscriptions(first: 25) {
+        edges {
+          node {
+            id
+            topic
+            endpoint {
+              __typename
+              ... on WebhookHttpEndpoint {
+                callbackUrl
+              }
+            }
+            createdAt
+          }
+        }
+      }
+    }
+    """
+
+    data = _graphql_request(query)
+    edges = data["webhookSubscriptions"]["edges"]
+
+    if not edges:
+        print("No webhooks registered.")
+        return
+
+    print(f"{'Topic':<25} {'URL':<55} {'ID'}")
+    print("-" * 120)
+    for edge in edges:
+        node = edge["node"]
+        url = node.get("endpoint", {}).get("callbackUrl", "N/A")
+        print(f"{node['topic']:<25} {url:<55} {node['id']}")
+
+
+@cli.command()
 def webhook() -> None:
     """Start the Shopify webhook listener."""
     from webhook_server import create_webhook_app
