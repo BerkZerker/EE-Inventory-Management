@@ -45,6 +45,21 @@ def _close_db(exc: BaseException | None = None) -> None:
 
 
 # ===========================================================================
+# Shopify sync
+# ===========================================================================
+
+
+@api_bp.route("/sync/products", methods=["POST"])
+@handle_errors
+def sync_products() -> tuple:
+    """Sync products from Shopify into the local database."""
+    from services.shopify_sync import sync_products_from_shopify
+
+    count = sync_products_from_shopify()
+    return jsonify({"synced": count}), 200
+
+
+# ===========================================================================
 # Invoice endpoints
 # ===========================================================================
 

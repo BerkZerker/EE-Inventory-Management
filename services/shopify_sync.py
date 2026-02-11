@@ -165,12 +165,15 @@ def sync_products_from_shopify() -> int:
     """Import / update products from Shopify into the local database.
 
     Pages through all products and upserts each variant with a SKU.
+    Deletes local products that no longer exist in Shopify (only if they
+    have no associated bikes).
     Returns the number of products synced.
     """
     conn = get_db(settings.database_path)
     try:
         cursor: str | None = None
         synced = 0
+        seen_skus: set[str] = set()
 
         while True:
             variables: dict = {"cursor": cursor}
@@ -188,6 +191,7 @@ def sync_products_from_shopify() -> int:
                     if not sku:
                         continue
 
+                    seen_skus.add(sku)
                     price = float(variant["price"])
                     cost = None
                     try:
@@ -217,6 +221,28 @@ def sync_products_from_shopify() -> int:
             if not page_info["hasNextPage"]:
                 break
             cursor = page_info["endCursor"]
+
+        # Remove local products that were deleted from Shopify
+        local_products = models.list_products(conn)
+        removed = 0
+        for product in local_products:
+            if product["sku"] not in seen_skus and product.get("shopify_product_id"):
+                # Only delete if no bikes reference this product
+                bike_count = conn.execute(
+                    "SELECT COUNT(*) FROM bikes WHERE product_id = ?",
+                    (product["id"],),
+                ).fetchone()[0]
+                if bike_count == 0:
+                    models.delete_product(conn, product["id"])
+                    removed += 1
+                else:
+                    logger.info(
+                        "Keeping deleted Shopify product %s (%s) - has %d bikes",
+                        product["sku"], product["model_name"], bike_count,
+                    )
+
+        if removed:
+            logger.info("Removed %d products no longer in Shopify", removed)
 
         return synced
     finally:
