@@ -46,4 +46,7 @@ echo "  Press Ctrl+C to stop all services"
 echo "========================================="
 echo ""
 
+# Open frontend in browser after a short delay to let the dev server start
+(sleep 2 && xdg-open http://localhost:5173 2>/dev/null || open http://localhost:5173 2>/dev/null || true) &
+
 wait

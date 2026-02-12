@@ -107,7 +107,7 @@ export default function ReportPage() {
                 {byProduct.map((row) => (
                   <tr key={row.product_id}>
                     <td>{row.sku}</td>
-                    <td>{row.model_name}</td>
+                    <td>{row.brand} {row.model}</td>
                     <td>{row.units_sold}</td>
                     <td>${row.total_revenue.toFixed(2)}</td>
                     <td>${row.total_cost.toFixed(2)}</td>

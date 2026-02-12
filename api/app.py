@@ -9,6 +9,7 @@ from flask_cors import CORS
 
 from api.routes import api_bp
 from config import settings
+from database.connection import init_database
 
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -21,6 +22,9 @@ def create_app() -> Flask:
 
     # CORS for Vite dev server
     CORS(app, origins=["http://localhost:5173"])
+
+    # Ensure database schema is up to date (adds new columns if needed)
+    init_database(settings.database_path)
 
     # Register API blueprint
     app.register_blueprint(api_bp)

@@ -44,8 +44,9 @@ def test_foreign_key_enforcement(db: sqlite3.Connection) -> None:
 def test_product_insert_and_query(
     db: sqlite3.Connection, sample_product: dict[str, object]
 ) -> None:
-    assert sample_product["sku"] == "TREK-VERVE-3-BLU-M"
-    assert sample_product["model_name"] == "Trek Verve 3"
+    assert sample_product["sku"] == "TREK-VERVE-3-BLUE-MEDIUM"
+    assert sample_product["brand"] == "Trek"
+    assert sample_product["model"] == "Verve 3"
     assert sample_product["retail_price"] == 1299.99
 
 

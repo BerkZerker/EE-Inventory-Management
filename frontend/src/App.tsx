@@ -1,7 +1,5 @@
-import { useEffect } from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
 import "./App.css";
-import apiClient from "@/api/client";
 import UploadPage from "@/pages/UploadPage";
 import InvoiceListPage from "@/pages/InvoiceListPage";
 import ReviewPage from "@/pages/ReviewPage";
@@ -55,10 +53,6 @@ function Dashboard() {
 }
 
 function App() {
-  useEffect(() => {
-    apiClient.post("/sync/products").catch(() => {});
-  }, []);
-
   return (
     <div className="app">
       <div className="app-layout">

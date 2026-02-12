@@ -66,35 +66,35 @@ def _build_update(
 
 _PRODUCT_UPDATE_ALLOWED = {
     "sku",
-    "model_name",
+    "brand",
+    "model",
     "color",
     "size",
     "retail_price",
     "shopify_product_id",
-    "shopify_variant_id",
 }
 
 
 def create_product(
     conn: sqlite3.Connection,
     sku: str,
-    model_name: str,
+    brand: str,
+    model: str,
     retail_price: float,
     color: str | None = None,
     size: str | None = None,
     shopify_product_id: str | None = None,
-    shopify_variant_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Insert a new product and return it, or None on duplicate SKU."""
     try:
         cur = conn.execute(
             """
             INSERT INTO products
-                (sku, model_name, retail_price, color, size,
-                 shopify_product_id, shopify_variant_id)
+                (sku, brand, model, retail_price, color, size,
+                 shopify_product_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (sku, model_name, retail_price, color, size, shopify_product_id, shopify_variant_id),
+            (sku, brand, model, retail_price, color, size, shopify_product_id),
         )
         conn.commit()
     except sqlite3.IntegrityError:
@@ -117,8 +117,22 @@ def get_product_by_sku(conn: sqlite3.Connection, sku: str) -> dict[str, Any] | N
 
 
 def list_products(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Return all products ordered by model_name."""
-    return _rows_to_list(conn.execute("SELECT * FROM products ORDER BY model_name").fetchall())
+    """Return all products ordered by brand, model."""
+    return _rows_to_list(conn.execute("SELECT * FROM products ORDER BY brand, model").fetchall())
+
+
+def get_products_by_brand_model(
+    conn: sqlite3.Connection,
+    brand: str,
+    model: str,
+) -> list[dict[str, Any]]:
+    """Return all products sharing the same brand+model (sibling variants)."""
+    return _rows_to_list(
+        conn.execute(
+            "SELECT * FROM products WHERE brand = ? AND model = ?",
+            (brand, model),
+        ).fetchall()
+    )
 
 
 def update_product(
@@ -149,6 +163,15 @@ def delete_product(conn: sqlite3.Connection, product_id: int) -> bool:
 _VALID_INVOICE_STATUSES = {"pending", "approved", "rejected"}
 
 
+_INVOICE_UPDATE_ALLOWED = {
+    "shipping_cost",
+    "discount",
+    "credit_card_fees",
+    "tax",
+    "other_fees",
+}
+
+
 def create_invoice(
     conn: sqlite3.Connection,
     invoice_ref: str,
@@ -157,6 +180,9 @@ def create_invoice(
     total_amount: float | None = None,
     shipping_cost: float = 0,
     discount: float = 0,
+    credit_card_fees: float = 0,
+    tax: float = 0,
+    other_fees: float = 0,
     file_path: str | None = None,
     parsed_data: str | None = None,
 ) -> dict[str, Any]:
@@ -165,8 +191,9 @@ def create_invoice(
         """
         INSERT INTO invoices
             (invoice_ref, supplier, invoice_date, total_amount,
-             shipping_cost, discount, file_path, parsed_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             shipping_cost, discount, credit_card_fees, tax, other_fees,
+             file_path, parsed_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             invoice_ref,
@@ -175,6 +202,9 @@ def create_invoice(
             total_amount,
             shipping_cost,
             discount,
+            credit_card_fees,
+            tax,
+            other_fees,
             file_path,
             parsed_data,
         ),
@@ -182,6 +212,18 @@ def create_invoice(
     conn.commit()
     row = conn.execute("SELECT * FROM invoices WHERE id = ?", (cur.lastrowid,)).fetchone()
     return dict(row)
+
+
+def update_invoice(
+    conn: sqlite3.Connection,
+    invoice_id: int,
+    **fields: Any,
+) -> dict[str, Any] | None:
+    """Update an invoice's editable cost fields and return the updated row."""
+    sql, params = _build_update("invoices", invoice_id, fields, _INVOICE_UPDATE_ALLOWED)
+    conn.execute(sql, params)
+    conn.commit()
+    return get_invoice(conn, invoice_id)
 
 
 def get_invoice(conn: sqlite3.Connection, invoice_id: int) -> dict[str, Any] | None:
@@ -253,6 +295,20 @@ def update_invoice_status(
         )
     conn.commit()
     return get_invoice(conn, invoice_id)
+
+
+def delete_invoice_by_ref(conn: sqlite3.Connection, ref: str) -> bool:
+    """Delete a pending invoice by its invoice_ref. Returns True if deleted."""
+    row = conn.execute(
+        "SELECT id, status FROM invoices WHERE invoice_ref = ?", (ref,)
+    ).fetchone()
+    if row is None:
+        return False
+    if row["status"] != "pending":
+        return False
+    conn.execute("DELETE FROM invoices WHERE id = ?", (row["id"],))
+    conn.commit()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +544,7 @@ def list_bikes(
 ) -> list[dict[str, Any]]:
     """Return bikes with product info, optionally filtered and paginated."""
     sql = """
-        SELECT b.*, p.sku, p.model_name, p.color, p.size, p.retail_price
+        SELECT b.*, p.sku, p.brand, p.model, p.color, p.size, p.retail_price
         FROM bikes b
         JOIN products p ON b.product_id = p.id
     """
@@ -681,7 +737,8 @@ def get_inventory_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             SELECT
                 p.id            AS product_id,
                 p.sku,
-                p.model_name,
+                p.brand,
+                p.model,
                 p.retail_price,
                 COUNT(b.id)                                     AS total_bikes,
                 SUM(CASE WHEN b.status = 'available' THEN 1 ELSE 0 END)
@@ -696,7 +753,7 @@ def get_inventory_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             FROM products p
             LEFT JOIN bikes b ON b.product_id = p.id
             GROUP BY p.id
-            ORDER BY p.model_name
+            ORDER BY p.brand, p.model
             """
         ).fetchall()
     )
@@ -714,7 +771,8 @@ def get_profit_report(
             SELECT
                 p.id            AS product_id,
                 p.sku,
-                p.model_name,
+                p.brand,
+                p.model,
                 COUNT(b.id)                             AS units_sold,
                 ROUND(SUM(b.sale_price), 2)             AS total_revenue,
                 ROUND(SUM(b.actual_cost), 2)            AS total_cost,

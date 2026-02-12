@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from database.models import (
     create_bike,
     create_product,
     get_bike,
+    get_product,
     list_bikes,
     update_bike,
     update_bike_status,
@@ -22,8 +24,7 @@ from services.shopify_sync import (
     _graphql_request,
     archive_sold_variants,
     create_variants_for_bikes,
-    ensure_serial_option,
-    sync_products_from_shopify,
+    ensure_shopify_product,
 )
 
 # ---------------------------------------------------------------------------
@@ -47,10 +48,7 @@ class _MockSettings:
 
 
 class _NoCloseConnection:
-    """Wrapper around a sqlite3.Connection that ignores .close() calls.
-
-    Prevents finally-block closes from destroying the shared in-memory fixture.
-    """
+    """Wrapper around a sqlite3.Connection that ignores .close() calls."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         object.__setattr__(self, "_conn", conn)
@@ -126,7 +124,6 @@ class TestGraphqlRequest:
         req = responses.calls[0].request
         assert req.headers["X-Shopify-Access-Token"] == "shpat_test_token"
         assert req.headers["Content-Type"] == "application/json"
-        import json
 
         body = json.loads(req.body)
         assert body["query"] == "{ products { id } }"
@@ -169,281 +166,64 @@ class TestGraphqlRequest:
 
 
 # =========================================================================
-# TestSyncProducts
+# TestEnsureShopifyProduct
 # =========================================================================
 
 
-class TestSyncProducts:
+class TestEnsureShopifyProduct:
     @responses.activate
     @pytest.mark.usefixtures("_patch_db")
-    def test_sync_creates_products(self, db: sqlite3.Connection) -> None:
-        """Products from Shopify should be created in the local DB."""
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "products": {
-                        "edges": [
-                            {
-                                "node": {
-                                    "id": "gid://shopify/Product/1",
-                                    "title": "Trek Verve 3",
-                                    "variants": {
-                                        "edges": [
-                                            {
-                                                "node": {
-                                                    "id": "gid://shopify/ProductVariant/10",
-                                                    "sku": "TREK-V3-BLU",
-                                                    "price": "1299.99",
-                                                    "inventoryItem": {
-                                                        "unitCost": {
-                                                            "amount": "800.00",
-                                                        }
-                                                    },
-                                                }
-                                            }
-                                        ]
-                                    },
-                                }
-                            }
-                        ],
-                        "pageInfo": {
-                            "hasNextPage": False,
-                            "endCursor": None,
-                        },
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
+    def test_sibling_has_product_id(self, db: sqlite3.Connection) -> None:
+        """If a sibling already has a shopify_product_id, use it."""
+        create_product(
+            db, sku="TREK-VERVE3-BLU-M", brand="Trek", model="Verve 3",
+            retail_price=1299.99, color="Blue", size="Medium",
+            shopify_product_id="gid://shopify/Product/1",
         )
-
-        count = sync_products_from_shopify()
-
-        assert count == 1
-        from database.models import get_product_by_sku
-
-        product = get_product_by_sku(db, "TREK-V3-BLU")
+        product = create_product(
+            db, sku="TREK-VERVE3-RED-L", brand="Trek", model="Verve 3",
+            retail_price=1299.99, color="Red", size="Large",
+        )
         assert product is not None
-        assert product["model_name"] == "Trek Verve 3"
-        assert product["retail_price"] == 1299.99
-        assert product["shopify_product_id"] == "gid://shopify/Product/1"
+
+        result = ensure_shopify_product(db, product)
+        assert result == "gid://shopify/Product/1"
+
+        # Verify the product now has the shopify_product_id
+        updated = get_product(db, product["id"])
+        assert updated["shopify_product_id"] == "gid://shopify/Product/1"
 
     @responses.activate
     @pytest.mark.usefixtures("_patch_db")
-    def test_sync_updates_existing(self, db: sqlite3.Connection) -> None:
-        """If a product with the same SKU exists, it should be updated."""
-        create_product(db, sku="TREK-V3-BLU", model_name="Old Name", retail_price=999.99)
-
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "products": {
-                        "edges": [
-                            {
-                                "node": {
-                                    "id": "gid://shopify/Product/1",
-                                    "title": "Trek Verve 3 Updated",
-                                    "variants": {
-                                        "edges": [
-                                            {
-                                                "node": {
-                                                    "id": "gid://shopify/ProductVariant/10",
-                                                    "sku": "TREK-V3-BLU",
-                                                    "price": "1399.99",
-                                                    "inventoryItem": {
-                                                        "unitCost": {
-                                                            "amount": "850.00",
-                                                        }
-                                                    },
-                                                }
-                                            }
-                                        ]
-                                    },
-                                }
-                            }
-                        ],
-                        "pageInfo": {
-                            "hasNextPage": False,
-                            "endCursor": None,
-                        },
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
+    def test_creates_new_shopify_product(self, db: sqlite3.Connection) -> None:
+        """If no sibling and no Shopify match, create a new product."""
+        product = create_product(
+            db, sku="TREK-VERVE3-BLU-M", brand="Trek", model="Verve 3",
+            retail_price=1299.99, color="Blue", size="Medium",
         )
-
-        count = sync_products_from_shopify()
-
-        assert count == 1
-        from database.models import get_product_by_sku
-
-        product = get_product_by_sku(db, "TREK-V3-BLU")
         assert product is not None
-        assert product["model_name"] == "Trek Verve 3 Updated"
-        assert product["retail_price"] == 1399.99
 
-    @responses.activate
-    @pytest.mark.usefixtures("_patch_db")
-    def test_sync_pagination(self, db: sqlite3.Connection) -> None:
-        """Multiple pages of products should all be synced."""
-        # Page 1 — hasNextPage=true
+        # Search returns no match
         responses.add(
             responses.POST,
             SHOPIFY_GRAPHQL_URL,
             json={
-                "data": {
-                    "products": {
-                        "edges": [
-                            {
-                                "node": {
-                                    "id": "gid://shopify/Product/1",
-                                    "title": "Bike A",
-                                    "variants": {
-                                        "edges": [
-                                            {
-                                                "node": {
-                                                    "id": "gid://shopify/ProductVariant/10",
-                                                    "sku": "SKU-A",
-                                                    "price": "1000.00",
-                                                    "inventoryItem": {
-                                                        "unitCost": {"amount": "500.00"}
-                                                    },
-                                                }
-                                            }
-                                        ]
-                                    },
-                                }
-                            }
-                        ],
-                        "pageInfo": {
-                            "hasNextPage": True,
-                            "endCursor": "cursor-page-1",
-                        },
-                    }
-                },
+                "data": {"products": {"edges": []}},
                 "extensions": _good_extensions(),
             },
             status=200,
         )
-        # Page 2 — hasNextPage=false
+        # Create returns new product
         responses.add(
             responses.POST,
             SHOPIFY_GRAPHQL_URL,
             json={
                 "data": {
-                    "products": {
-                        "edges": [
-                            {
-                                "node": {
-                                    "id": "gid://shopify/Product/2",
-                                    "title": "Bike B",
-                                    "variants": {
-                                        "edges": [
-                                            {
-                                                "node": {
-                                                    "id": "gid://shopify/ProductVariant/20",
-                                                    "sku": "SKU-B",
-                                                    "price": "2000.00",
-                                                    "inventoryItem": {
-                                                        "unitCost": {"amount": "900.00"}
-                                                    },
-                                                }
-                                            }
-                                        ]
-                                    },
-                                }
-                            }
-                        ],
-                        "pageInfo": {
-                            "hasNextPage": False,
-                            "endCursor": None,
-                        },
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
-        )
-
-        count = sync_products_from_shopify()
-
-        assert count == 2
-        assert len(responses.calls) == 2
-        from database.models import get_product_by_sku
-
-        assert get_product_by_sku(db, "SKU-A") is not None
-        assert get_product_by_sku(db, "SKU-B") is not None
-
-
-# =========================================================================
-# TestEnsureSerialOption
-# =========================================================================
-
-
-class TestEnsureSerialOption:
-    @responses.activate
-    def test_option_already_exists(self) -> None:
-        """If 'Serial' option already exists, no mutation should be called."""
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "product": {
-                        "options": [
-                            {"id": "gid://shopify/ProductOption/1", "name": "Color"},
-                            {"id": "gid://shopify/ProductOption/2", "name": "Serial"},
-                        ]
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
-        )
-
-        option_id = ensure_serial_option("gid://shopify/Product/1")
-
-        assert option_id == "gid://shopify/ProductOption/2"
-        # Only one request (the query), no mutation
-        assert len(responses.calls) == 1
-
-    @responses.activate
-    def test_creates_serial_option(self) -> None:
-        """If 'Serial' option is missing, a mutation should create it."""
-        # First call: query returns no Serial option
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "product": {
-                        "options": [
-                            {"id": "gid://shopify/ProductOption/1", "name": "Color"},
-                        ]
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
-        )
-        # Second call: mutation creates Serial option
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "productOptionsCreate": {
+                    "productCreate": {
                         "userErrors": [],
                         "product": {
-                            "options": [
-                                {"id": "gid://shopify/ProductOption/1", "name": "Color"},
-                                {"id": "gid://shopify/ProductOption/3", "name": "Serial"},
-                            ]
+                            "id": "gid://shopify/Product/99",
+                            "title": "Trek Verve 3",
                         },
                     }
                 },
@@ -452,10 +232,44 @@ class TestEnsureSerialOption:
             status=200,
         )
 
-        option_id = ensure_serial_option("gid://shopify/Product/1")
-
-        assert option_id == "gid://shopify/ProductOption/3"
+        result = ensure_shopify_product(db, product)
+        assert result == "gid://shopify/Product/99"
         assert len(responses.calls) == 2
+
+    @responses.activate
+    @pytest.mark.usefixtures("_patch_db")
+    def test_finds_existing_shopify_product(self, db: sqlite3.Connection) -> None:
+        """If Shopify search finds a matching title, use that product."""
+        product = create_product(
+            db, sku="TREK-VERVE3-BLU-M", brand="Trek", model="Verve 3",
+            retail_price=1299.99, color="Blue", size="Medium",
+        )
+        assert product is not None
+
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "products": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "id": "gid://shopify/Product/50",
+                                    "title": "Trek Verve 3",
+                                }
+                            }
+                        ]
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+
+        result = ensure_shopify_product(db, product)
+        assert result == "gid://shopify/Product/50"
+        assert len(responses.calls) == 1  # Only search, no create
 
 
 # =========================================================================
@@ -466,13 +280,16 @@ class TestEnsureSerialOption:
 class TestCreateVariantsForBikes:
     @responses.activate
     @pytest.mark.usefixtures("_patch_db")
-    def test_creates_variants(self, db: sqlite3.Connection) -> None:
-        """Variants should be created and local bikes updated with variant IDs."""
+    def test_creates_variants_with_three_options(self, db: sqlite3.Connection) -> None:
+        """Variants should use Color/Size/Serial option values."""
         product = create_product(
             db,
-            sku="TREK-V3",
-            model_name="Trek Verve 3",
+            sku="TREK-V3-BLU-M",
+            brand="Trek",
+            model="Verve 3",
             retail_price=1299.99,
+            color="Blue",
+            size="Medium",
             shopify_product_id="gid://shopify/Product/1",
         )
         assert product is not None
@@ -484,22 +301,6 @@ class TestCreateVariantsForBikes:
             db, serial_number="BIKE-002", product_id=product["id"], actual_cost=810.0
         )
 
-        # ensure_serial_option query — Serial already exists
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "product": {
-                        "options": [
-                            {"id": "gid://shopify/ProductOption/1", "name": "Serial"},
-                        ]
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
-        )
         # _get_location_id query
         responses.add(
             responses.POST,
@@ -558,6 +359,14 @@ class TestCreateVariantsForBikes:
         assert updated_bike2 is not None
         assert updated_bike2["shopify_variant_id"] == "gid://shopify/ProductVariant/101"
 
+        # Verify option values in the request
+        request_body = json.loads(responses.calls[1].request.body)
+        variant_input = request_body["variables"]["variants"][0]
+        option_values = variant_input["optionValues"]
+        assert len(option_values) == 3
+        names = {ov["optionName"] for ov in option_values}
+        assert names == {"Color", "Size", "Serial"}
+
     @responses.activate
     @pytest.mark.usefixtures("_patch_db")
     def test_partial_failure(self, db: sqlite3.Connection) -> None:
@@ -565,7 +374,8 @@ class TestCreateVariantsForBikes:
         product = create_product(
             db,
             sku="TREK-V3",
-            model_name="Trek Verve 3",
+            brand="Trek",
+            model="Verve 3",
             retail_price=1299.99,
             shopify_product_id="gid://shopify/Product/1",
         )
@@ -578,22 +388,6 @@ class TestCreateVariantsForBikes:
             db, serial_number="BIKE-002", product_id=product["id"], actual_cost=810.0
         )
 
-        # ensure_serial_option — already exists
-        responses.add(
-            responses.POST,
-            SHOPIFY_GRAPHQL_URL,
-            json={
-                "data": {
-                    "product": {
-                        "options": [
-                            {"id": "gid://shopify/ProductOption/1", "name": "Serial"},
-                        ]
-                    }
-                },
-                "extensions": _good_extensions(),
-            },
-            status=200,
-        )
         # _get_location_id
         responses.add(
             responses.POST,
@@ -661,7 +455,8 @@ class TestArchiveSoldVariants:
         product = create_product(
             db,
             sku="TREK-V3",
-            model_name="Trek Verve 3",
+            brand="Trek",
+            model="Verve 3",
             retail_price=1299.99,
             shopify_product_id="gid://shopify/Product/1",
         )
@@ -715,8 +510,6 @@ class TestArchiveSoldVariants:
         assert updated_bike2["shopify_variant_id"] is None
 
         # Verify the correct variant IDs were sent in the request
-        import json
-
         request_body = json.loads(responses.calls[0].request.body)
         sent_ids = request_body["variables"]["variantsIds"]
         assert set(sent_ids) == {

@@ -1,10 +1,10 @@
-/** Product master record (one per bike model). */
+/** Product master record (one per bike model/color/size combo). */
 export interface Product {
   id: number;
   sku: string;
   shopify_product_id: string | null;
-  shopify_variant_id: string | null;
-  model_name: string;
+  brand: string;
+  model: string;
   color: string | null;
   size: string | null;
   retail_price: number;
@@ -21,6 +21,9 @@ export interface Invoice {
   total_amount: number | null;
   shipping_cost: number;
   discount: number;
+  credit_card_fees: number;
+  tax: number;
+  other_fees: number;
   file_path: string | null;
   status: "pending" | "approved" | "rejected";
   approved_by: string | null;
@@ -60,7 +63,8 @@ export interface Bike {
   created_at: string;
   /* joined fields from list_bikes */
   sku?: string;
-  model_name?: string;
+  brand?: string;
+  model?: string;
   color?: string;
   size?: string;
   retail_price?: number;
@@ -70,7 +74,8 @@ export interface Bike {
 export interface InventorySummary {
   product_id: number;
   sku: string;
-  model_name: string;
+  brand: string;
+  model: string;
   retail_price: number;
   total_bikes: number;
   available: number;
@@ -93,7 +98,8 @@ export interface ProfitSummary {
 export interface ProfitByProduct {
   product_id: number;
   sku: string;
-  model_name: string;
+  brand: string;
+  model: string;
   units_sold: number;
   total_revenue: number;
   total_cost: number;

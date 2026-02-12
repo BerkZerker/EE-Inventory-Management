@@ -53,6 +53,9 @@ class TestParsedInvoiceModels:
         )
         assert invoice.shipping_cost == 0.0
         assert invoice.discount == 0.0
+        assert invoice.credit_card_fees == 0.0
+        assert invoice.tax == 0.0
+        assert invoice.other_fees == 0.0
         assert invoice.total == 0.0
 
     def test_invoice_full(self) -> None:
@@ -67,19 +70,26 @@ class TestParsedInvoiceModels:
             ],
             shipping_cost=150.0,
             discount=50.0,
-            total=1700.0,
+            credit_card_fees=25.0,
+            tax=80.0,
+            other_fees=10.0,
+            total=1815.0,
         )
         assert len(invoice.items) == 1
         assert invoice.shipping_cost == 150.0
+        assert invoice.credit_card_fees == 25.0
+        assert invoice.tax == 80.0
+        assert invoice.other_fees == 10.0
 
 
 # =========================================================================
-# allocate_costs
+# allocate_costs — even-per-bike distribution
 # =========================================================================
 
 
 class TestAllocateCosts:
     def test_no_adjustment(self) -> None:
+        """No extras → allocated cost equals unit_cost."""
         items = [
             ParsedInvoiceItem(model="A", quantity=2, unit_cost=100.0, total_cost=200.0),
             ParsedInvoiceItem(model="B", quantity=1, unit_cost=300.0, total_cost=300.0),
@@ -87,27 +97,32 @@ class TestAllocateCosts:
         costs = allocate_costs(items, shipping=0.0, discount=0.0)
         assert costs == [100.0, 300.0]
 
-    def test_shipping_only(self) -> None:
+    def test_shipping_only_even_split(self) -> None:
+        """Shipping splits evenly across all bikes."""
         items = [
             ParsedInvoiceItem(model="A", quantity=2, unit_cost=100.0, total_cost=200.0),
             ParsedInvoiceItem(model="B", quantity=1, unit_cost=300.0, total_cost=300.0),
         ]
-        costs = allocate_costs(items, shipping=50.0, discount=0.0)
-        # A proportion = 200/500 = 0.4, B proportion = 300/500 = 0.6
-        # A per-unit = (200 + 0.4*50) / 2 = 220/2 = 110.0
-        # B per-unit = (300 + 0.6*50) / 1 = 330.0
-        assert costs[0] == 110.0
-        assert costs[1] == 330.0
+        # 3 bikes total, $30 shipping → $10/bike
+        costs = allocate_costs(items, shipping=30.0, discount=0.0)
+        assert costs[0] == 110.0  # 100 + 10
+        assert costs[1] == 310.0  # 300 + 10
+
+    def test_two_bikes_with_shipping(self) -> None:
+        """User's example: 2 bikes @ $1000 + $200 shipping = $1100/bike."""
+        items = [
+            ParsedInvoiceItem(model="A", quantity=2, unit_cost=1000.0, total_cost=2000.0),
+        ]
+        costs = allocate_costs(items, shipping=200.0, discount=0.0)
+        assert costs == [1100.0]  # 1000 + 200/2
 
     def test_discount_only(self) -> None:
         items = [
             ParsedInvoiceItem(model="A", quantity=1, unit_cost=500.0, total_cost=500.0),
             ParsedInvoiceItem(model="B", quantity=1, unit_cost=500.0, total_cost=500.0),
         ]
+        # 2 bikes, discount $100 → -$50/bike
         costs = allocate_costs(items, shipping=0.0, discount=100.0)
-        # Each proportion = 0.5, net_adjustment = -100
-        # A per-unit = (500 + 0.5*(-100)) / 1 = 450.0
-        # B per-unit = (500 + 0.5*(-100)) / 1 = 450.0
         assert costs == [450.0, 450.0]
 
     def test_shipping_and_discount(self) -> None:
@@ -115,37 +130,57 @@ class TestAllocateCosts:
             ParsedInvoiceItem(model="A", quantity=2, unit_cost=100.0, total_cost=200.0),
             ParsedInvoiceItem(model="B", quantity=3, unit_cost=100.0, total_cost=300.0),
         ]
+        # 5 bikes, shipping=50, discount=25 → extras=25, 25/5=5/bike
         costs = allocate_costs(items, shipping=50.0, discount=25.0)
-        # subtotal = 500, net = 25
-        # A: proportion=0.4, per-unit = (200 + 10) / 2 = 105.0
-        # B: proportion=0.6, per-unit = (300 + 15) / 3 = 105.0
-        assert costs[0] == 105.0
-        assert costs[1] == 105.0
+        assert costs[0] == 105.0  # 100 + 5
+        assert costs[1] == 105.0  # 100 + 5
+
+    def test_all_fee_types(self) -> None:
+        """Test with credit_card_fees, tax, and other_fees."""
+        items = [
+            ParsedInvoiceItem(model="A", quantity=2, unit_cost=500.0, total_cost=1000.0),
+        ]
+        # extras = 50 + 30 + 20 + 10 - 10 = 100, per bike = 50
+        costs = allocate_costs(
+            items, shipping=50.0, discount=10.0,
+            credit_card_fees=30.0, tax=20.0, other_fees=10.0,
+        )
+        assert costs == [550.0]
 
     def test_single_item(self) -> None:
         items = [
             ParsedInvoiceItem(model="A", quantity=3, unit_cost=100.0, total_cost=300.0),
         ]
+        # 3 bikes, $30 shipping → $10/bike
         costs = allocate_costs(items, shipping=30.0, discount=0.0)
-        # per-unit = (300 + 30) / 3 = 110.0
         assert costs == [110.0]
 
     def test_penny_accurate_rounding(self) -> None:
         """Verify the remainder is applied to the last item for penny accuracy."""
         items = [
-            ParsedInvoiceItem(model="A", quantity=3, unit_cost=33.33, total_cost=100.0),
-            ParsedInvoiceItem(model="B", quantity=1, unit_cost=200.0, total_cost=200.0),
+            ParsedInvoiceItem(model="A", quantity=3, unit_cost=100.0, total_cost=300.0),
+            ParsedInvoiceItem(model="B", quantity=2, unit_cost=200.0, total_cost=400.0),
         ]
-        # shipping=1.0 → net_adjustment = 1.0
-        # subtotal = 300, expected_total = 301
-        # A proportion = 100/300 = 1/3, per_unit = (100 + 1/3) / 3 = 33.44
-        # B proportion = 200/300 = 2/3, per_unit = (200 + 2/3) / 1 = 200.67
-        # actual_total = 33.44*3 + 200.67 = 100.32 + 200.67 = 300.99
-        # remainder = 301 - 300.99 = 0.01
-        # Last item adjusted: 200.67 + 0.01 = 200.68
+        # 5 bikes, shipping=1.0 → extras=1.0, per_bike=0.2
+        # A: 100 + 0.2 = 100.2, B: 200 + 0.2 = 200.2
+        # actual = 100.2*3 + 200.2*2 = 300.6 + 400.4 = 701
+        # expected = 700 + 1 = 701 → exact, no remainder
         costs = allocate_costs(items, shipping=1.0, discount=0.0)
         actual_total = sum(c * item.quantity for c, item in zip(costs, items))
-        expected_total = 301.0
+        expected_total = 701.0
+        assert round(actual_total, 2) == expected_total
+
+    def test_penny_remainder_on_last_item(self) -> None:
+        """Remainder is absorbed by last item (works best when last has qty=1)."""
+        items = [
+            ParsedInvoiceItem(model="A", quantity=2, unit_cost=100.0, total_cost=200.0),
+            ParsedInvoiceItem(model="B", quantity=1, unit_cost=200.0, total_cost=200.0),
+        ]
+        # 3 bikes, shipping=1.0 → per_bike=0.33
+        # A: 100.33*2=200.66, B needs 200+1-200.66=200.34
+        costs = allocate_costs(items, shipping=1.0, discount=0.0)
+        actual_total = sum(c * item.quantity for c, item in zip(costs, items))
+        expected_total = 401.0
         assert round(actual_total, 2) == expected_total
 
     def test_different_quantities(self) -> None:
@@ -153,18 +188,16 @@ class TestAllocateCosts:
             ParsedInvoiceItem(model="A", quantity=1, unit_cost=1000.0, total_cost=1000.0),
             ParsedInvoiceItem(model="B", quantity=5, unit_cost=200.0, total_cost=1000.0),
         ]
-        costs = allocate_costs(items, shipping=100.0, discount=0.0)
-        # Each proportion = 0.5
-        # A: (1000 + 50) / 1 = 1050.0
-        # B: (1000 + 50) / 5 = 210.0
-        assert costs[0] == 1050.0
-        assert costs[1] == 210.0
+        # 6 bikes, $120 shipping → $20/bike
+        costs = allocate_costs(items, shipping=120.0, discount=0.0)
+        assert costs[0] == 1020.0  # 1000 + 20
+        assert costs[1] == 220.0   # 200 + 20
 
-    def test_zero_subtotal_raises(self) -> None:
+    def test_zero_quantity_raises(self) -> None:
         items = [
-            ParsedInvoiceItem(model="A", quantity=1, unit_cost=0.0, total_cost=0.0),
+            ParsedInvoiceItem(model="A", quantity=0, unit_cost=100.0, total_cost=0.0),
         ]
-        with pytest.raises(ValueError, match="subtotal is zero"):
+        with pytest.raises(ValueError, match="bike count is zero"):
             allocate_costs(items, shipping=10.0, discount=0.0)
 
 
@@ -176,21 +209,21 @@ class TestAllocateCosts:
 class TestMatchToCatalog:
     def _catalog(self) -> list[dict]:
         return [
-            {"id": 1, "model_name": "Trek Verve 3", "color": "Blue", "size": "Medium"},
-            {"id": 2, "model_name": "Trek Verve 3", "color": "Red", "size": "Large"},
-            {"id": 3, "model_name": "Specialized Turbo", "color": "Black", "size": "Small"},
+            {"id": 1, "brand": "Trek", "model": "Verve 3", "color": "Blue", "size": "Medium"},
+            {"id": 2, "brand": "Trek", "model": "Verve 3", "color": "Red", "size": "Large"},
+            {"id": 3, "brand": "Specialized", "model": "Turbo", "color": "Black", "size": "Small"},
         ]
 
     def test_exact_match(self) -> None:
         item = ParsedInvoiceItem(
-            model="Trek Verve 3", color="Blue", size="Medium",
+            brand="Trek", model="Verve 3", color="Blue", size="Medium",
             quantity=1, unit_cost=800.0, total_cost=800.0,
         )
         assert match_to_catalog(item, self._catalog()) == 1
 
     def test_case_insensitive(self) -> None:
         item = ParsedInvoiceItem(
-            model="trek verve 3", color="blue", size="medium",
+            brand="trek", model="verve 3", color="blue", size="medium",
             quantity=1, unit_cost=800.0, total_cost=800.0,
         )
         assert match_to_catalog(item, self._catalog()) == 1
@@ -199,30 +232,39 @@ class TestMatchToCatalog:
         item = ParsedInvoiceItem(
             model="Verve 3", quantity=1, unit_cost=800.0, total_cost=800.0,
         )
-        # "verve 3" is a substring of "trek verve 3" → score 3
+        # "verve 3" exact matches catalog "Verve 3" → score 5
         result = match_to_catalog(item, self._catalog())
         assert result in (1, 2)  # Both Trek Verve 3 products match
 
     def test_no_match(self) -> None:
         item = ParsedInvoiceItem(
-            model="Giant Defy", quantity=1, unit_cost=800.0, total_cost=800.0,
+            brand="Giant", model="Defy", quantity=1, unit_cost=800.0, total_cost=800.0,
         )
         assert match_to_catalog(item, self._catalog()) is None
 
     def test_best_match_wins(self) -> None:
         item = ParsedInvoiceItem(
-            model="Trek Verve 3", color="Red", size="Large",
+            brand="Trek", model="Verve 3", color="Red", size="Large",
             quantity=1, unit_cost=800.0, total_cost=800.0,
         )
-        # Product 2 matches model (5) + color (2) + size (2) = 9
-        # Product 1 matches model (5) only = 5
+        # Product 2 matches brand (3) + model (5) + color (2) + size (2) = 12
+        # Product 1 matches brand (3) + model (5) only = 8
         assert match_to_catalog(item, self._catalog()) == 2
 
     def test_empty_catalog(self) -> None:
         item = ParsedInvoiceItem(
-            model="Trek Verve 3", quantity=1, unit_cost=800.0, total_cost=800.0,
+            brand="Trek", model="Verve 3", quantity=1, unit_cost=800.0, total_cost=800.0,
         )
         assert match_to_catalog(item, []) is None
+
+    def test_brand_field_in_item(self) -> None:
+        """Test that brand field is properly handled in ParsedInvoiceItem."""
+        item = ParsedInvoiceItem(
+            brand="Specialized", model="Turbo", color="Black", size="Small",
+            quantity=1, unit_cost=1200.0, total_cost=1200.0,
+        )
+        assert item.brand == "Specialized"
+        assert match_to_catalog(item, self._catalog()) == 3
 
 
 # =========================================================================

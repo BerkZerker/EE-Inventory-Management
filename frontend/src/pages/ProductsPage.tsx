@@ -3,7 +3,7 @@ import apiClient from "@/api/client";
 import type { Product } from "@/types";
 
 function emptyProduct() {
-  return { sku: "", model_name: "", retail_price: 0, color: "", size: "" };
+  return { brand: "", model: "", retail_price: 0, color: "", size: "" };
 }
 
 export default function ProductsPage() {
@@ -53,8 +53,8 @@ export default function ProductsPage() {
   const startEdit = (p: Product) => {
     setEditId(p.id);
     setForm({
-      sku: p.sku,
-      model_name: p.model_name,
+      brand: p.brand,
+      model: p.model,
       retail_price: p.retail_price,
       color: p.color ?? "",
       size: p.size ?? "",
@@ -99,31 +99,17 @@ export default function ProductsPage() {
           <h3>{editId ? "Edit Product" : "New Product"}</h3>
           <div className="form-row" style={{ flexWrap: "wrap" }}>
             <div className="form-group">
-              <label>SKU</label>
+              <label>Brand</label>
               <input
-                value={form.sku}
-                onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                disabled={editId !== null}
+                value={form.brand}
+                onChange={(e) => setForm({ ...form, brand: e.target.value })}
               />
             </div>
             <div className="form-group">
-              <label>Model Name</label>
+              <label>Model</label>
               <input
-                value={form.model_name}
-                onChange={(e) =>
-                  setForm({ ...form, model_name: e.target.value })
-                }
-              />
-            </div>
-            <div className="form-group">
-              <label>Retail Price</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.retail_price}
-                onChange={(e) =>
-                  setForm({ ...form, retail_price: Number(e.target.value) })
-                }
+                value={form.model}
+                onChange={(e) => setForm({ ...form, model: e.target.value })}
               />
             </div>
             <div className="form-group">
@@ -138,6 +124,17 @@ export default function ProductsPage() {
               <input
                 value={form.size}
                 onChange={(e) => setForm({ ...form, size: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Retail Price</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.retail_price}
+                onChange={(e) =>
+                  setForm({ ...form, retail_price: Number(e.target.value) })
+                }
               />
             </div>
             <div className="form-group">
@@ -160,10 +157,11 @@ export default function ProductsPage() {
         <table>
           <thead>
             <tr>
-              <th>SKU</th>
+              <th>Brand</th>
               <th>Model</th>
               <th>Color</th>
               <th>Size</th>
+              <th>SKU</th>
               <th>Price</th>
               <th>Actions</th>
             </tr>
@@ -171,10 +169,11 @@ export default function ProductsPage() {
           <tbody>
             {products.map((p) => (
               <tr key={p.id}>
-                <td>{p.sku}</td>
-                <td>{p.model_name}</td>
+                <td>{p.brand}</td>
+                <td>{p.model}</td>
                 <td>{p.color ?? "-"}</td>
                 <td>{p.size ?? "-"}</td>
+                <td>{p.sku}</td>
                 <td>${p.retail_price.toFixed(2)}</td>
                 <td>
                   <button

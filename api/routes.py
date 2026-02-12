@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 import database.models as models
@@ -52,11 +52,8 @@ def _close_db(exc: BaseException | None = None) -> None:
 @api_bp.route("/sync/products", methods=["POST"])
 @handle_errors
 def sync_products() -> tuple:
-    """Sync products from Shopify into the local database."""
-    from services.shopify_sync import sync_products_from_shopify
-
-    count = sync_products_from_shopify()
-    return jsonify({"synced": count}), 200
+    """No-op — product sync is now push-based."""
+    return jsonify({"synced": 0, "message": "Sync is now push-based. Products are pushed to Shopify on creation."}), 200
 
 
 # ===========================================================================
@@ -100,6 +97,27 @@ def upload_invoice() -> tuple:
     except ParseError as exc:
         return error_response(str(exc), 422)
 
+    # Check for duplicate invoice_ref and handle overwrite
+    overwrite = request.form.get("overwrite", "").lower() == "true"
+    existing_invoices = models.list_invoices(g.db)
+    for inv in existing_invoices:
+        if inv["invoice_ref"] == parsed.invoice_number:
+            if inv["status"] == "pending" and not overwrite:
+                return error_response(
+                    f"Invoice {parsed.invoice_number} already exists",
+                    409,
+                    details={"existing_id": inv["id"], "can_overwrite": True},
+                )
+            if inv["status"] == "pending" and overwrite:
+                models.delete_invoice_by_ref(g.db, parsed.invoice_number)
+                break
+            # Not pending — can't overwrite
+            return error_response(
+                f"Invoice {parsed.invoice_number} already exists (status: {inv['status']})",
+                409,
+                details={"existing_id": inv["id"], "can_overwrite": False},
+            )
+
     # Create invoice record
     invoice = models.create_invoice(
         g.db,
@@ -109,6 +127,9 @@ def upload_invoice() -> tuple:
         total_amount=parsed.total,
         shipping_cost=parsed.shipping_cost,
         discount=parsed.discount,
+        credit_card_fees=parsed.credit_card_fees,
+        tax=parsed.tax,
+        other_fees=parsed.other_fees,
         file_path=save_path,
         parsed_data=parsed.model_dump_json(),
     )
@@ -118,9 +139,10 @@ def upload_invoice() -> tuple:
     item_dicts: list[dict[str, Any]] = []
     for item in parsed.items:
         product_id = match_to_catalog(item, catalog)
+        desc = f"{item.brand} {item.model}".strip() if item.brand else item.model
         item_dicts.append(
             {
-                "description": item.model,
+                "description": desc,
                 "quantity": item.quantity,
                 "unit_cost": item.unit_cost,
                 "total_cost": item.total_cost,
@@ -215,9 +237,14 @@ def approve_invoice(invoice_id: int) -> tuple:
         for item in items
     ]
 
-    # Allocate costs (shipping + discount)
+    # Allocate costs (shipping + fees - discount)
     per_unit_costs = allocate_costs(
-        parsed_items, invoice["shipping_cost"], invoice["discount"]
+        parsed_items,
+        invoice["shipping_cost"],
+        invoice["discount"],
+        credit_card_fees=invoice.get("credit_card_fees", 0) or 0,
+        tax=invoice.get("tax", 0) or 0,
+        other_fees=invoice.get("other_fees", 0) or 0,
     )
 
     # Update each item's allocated_cost
@@ -250,9 +277,46 @@ def approve_invoice(invoice_id: int) -> tuple:
     # Update invoice status
     models.update_invoice_status(g.db, invoice_id, "approved")
 
+    # Push new bikes to Shopify as variants
+    shopify_errors: list[str] = []
+    try:
+        from services.shopify_sync import create_variants_for_bikes, ensure_shopify_product
+
+        # Group bikes by product_id
+        bikes_by_product: dict[int, list[dict]] = {}
+        for bike in bikes:
+            bikes_by_product.setdefault(bike["product_id"], []).append(bike)
+
+        for pid, product_bikes in bikes_by_product.items():
+            product = models.get_product(g.db, pid)
+            if not product:
+                shopify_errors.append(f"Product {pid} not found — skipped Shopify sync")
+                continue
+            # Ensure Shopify product exists (push-based)
+            if not product.get("shopify_product_id"):
+                ensure_shopify_product(g.db, product)
+                product = models.get_product(g.db, pid)
+            if not product or not product.get("shopify_product_id"):
+                shopify_errors.append(
+                    f"Product {pid} has no shopify_product_id — skipped Shopify sync"
+                )
+                continue
+            try:
+                create_variants_for_bikes(product_bikes, product)
+            except Exception as exc:
+                shopify_errors.append(f"Product {pid}: {exc}")
+    except Exception as exc:
+        shopify_errors.append(f"Shopify sync failed: {exc}")
+
+    if shopify_errors:
+        import logging
+        logging.getLogger(__name__).warning("Shopify sync issues: %s", shopify_errors)
+
     # Return final state
     final_invoice = models.get_invoice_with_items(g.db, invoice_id)
     final_invoice["bikes"] = bikes
+    if shopify_errors:
+        final_invoice["shopify_warnings"] = shopify_errors
 
     return jsonify(final_invoice), 200
 
@@ -272,6 +336,59 @@ def reject_invoice(invoice_id: int) -> tuple:
     return jsonify(updated), 200
 
 
+@api_bp.route("/invoices/<int:invoice_id>/pdf", methods=["GET"])
+@handle_errors
+def get_invoice_pdf(invoice_id: int) -> tuple:
+    """Serve the original invoice PDF file."""
+    invoice = models.get_invoice(g.db, invoice_id)
+    if invoice is None:
+        return error_response("Invoice not found", 404)
+
+    file_path = invoice.get("file_path")
+    if not file_path:
+        return error_response("PDF file not found", 404)
+
+    # Resolve relative paths against the project root
+    resolved = Path(file_path)
+    if not resolved.is_absolute():
+        resolved = Path(__file__).resolve().parent.parent / resolved
+
+    if not resolved.is_file():
+        return error_response("PDF file not found", 404)
+
+    return send_file(str(resolved), mimetype="application/pdf")
+
+
+@api_bp.route("/invoices/<int:invoice_id>", methods=["PUT"])
+@handle_errors
+def update_invoice(invoice_id: int) -> tuple:
+    """Update invoice-level cost fields on a pending invoice."""
+    invoice = models.get_invoice(g.db, invoice_id)
+    if invoice is None:
+        return error_response("Invoice not found", 404)
+
+    if invoice["status"] != "pending":
+        return error_response("Can only edit pending invoices", 400)
+
+    data = request.get_json()
+    if not data:
+        return error_response("Request body must be JSON", 400)
+
+    update_fields: dict[str, Any] = {}
+    for key in ("shipping_cost", "discount", "credit_card_fees", "tax", "other_fees"):
+        if key in data:
+            update_fields[key] = data[key]
+
+    if not update_fields:
+        return error_response("No valid fields to update", 400)
+
+    updated = models.update_invoice(g.db, invoice_id, **update_fields)
+    if updated is None:
+        return error_response("Invoice not found", 404)
+
+    return jsonify(updated), 200
+
+
 # ===========================================================================
 # Product endpoints
 # ===========================================================================
@@ -288,20 +405,28 @@ def list_products() -> tuple:
 @api_bp.route("/products", methods=["POST"])
 @handle_errors
 def create_product() -> tuple:
-    """Create a new product."""
+    """Create a new product. SKU is auto-generated from brand/model/color/size."""
+    import re
+
     data = request.get_json()
     if not data:
         return error_response("Request body must be JSON", 400)
 
     # Validate required fields
-    for field in ("sku", "model_name", "retail_price"):
+    for field in ("brand", "model", "retail_price"):
         if field not in data:
             return error_response(f"Missing required field: {field}", 400)
 
+    # Auto-generate SKU as BRAND-MODEL-COLOR-SIZE
+    parts = [data["brand"], data["model"], data.get("color", ""), data.get("size", "")]
+    sku = "-".join(p for p in parts if p).upper().replace(" ", "-")
+    sku = re.sub(r"[^A-Z0-9]+", "-", sku).strip("-")
+
     product = models.create_product(
         g.db,
-        sku=data["sku"],
-        model_name=data["model_name"],
+        sku=sku,
+        brand=data["brand"],
+        model=data["model"],
         retail_price=data["retail_price"],
         color=data.get("color"),
         size=data.get("size"),
@@ -310,16 +435,41 @@ def create_product() -> tuple:
     if product is None:
         return error_response("Duplicate SKU", 409)
 
+    # Push to Shopify
+    try:
+        from services.shopify_sync import ensure_shopify_product
+
+        ensure_shopify_product(g.db, product)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("Shopify push failed for product %s", sku)
+
     return jsonify(product), 201
 
 
 @api_bp.route("/products/<int:product_id>", methods=["PUT"])
 @handle_errors
 def update_product(product_id: int) -> tuple:
-    """Update an existing product."""
+    """Update an existing product. Regenerates SKU if brand/model/color/size change."""
+    import re
+
     data = request.get_json()
     if not data:
         return error_response("Request body must be JSON", 400)
+
+    # If any SKU component changed, regenerate SKU
+    if any(k in data for k in ("brand", "model", "color", "size")):
+        existing = models.get_product(g.db, product_id)
+        if existing is None:
+            return error_response("Product not found", 404)
+        brand = data.get("brand", existing["brand"])
+        model = data.get("model", existing["model"])
+        color = data.get("color", existing.get("color", ""))
+        size = data.get("size", existing.get("size", ""))
+        parts = [brand, model, color or "", size or ""]
+        sku = "-".join(p for p in parts if p).upper().replace(" ", "-")
+        sku = re.sub(r"[^A-Z0-9]+", "-", sku).strip("-")
+        data["sku"] = sku
 
     updated = models.update_product(g.db, product_id, **data)
     if updated is None:
@@ -470,7 +620,8 @@ def reconcile() -> tuple:
             results.append({
                 "product_id": product["id"],
                 "sku": product["sku"],
-                "model_name": product["model_name"],
+                "brand": product["brand"],
+                "model": product["model"],
                 "in_shopify_not_local": in_shopify_not_local,
                 "in_local_not_shopify": in_local_not_shopify,
             })

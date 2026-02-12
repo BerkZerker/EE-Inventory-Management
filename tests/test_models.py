@@ -49,36 +49,36 @@ from database.models import (
 
 class TestCreateProduct:
     def test_create_returns_dict(self, db: sqlite3.Connection) -> None:
-        product = create_product(db, sku="SKU-1", model_name="Model A", retail_price=100.0)
+        product = create_product(db, sku="SKU-1", brand="Brand", model="Model A", retail_price=100.0)
         assert product is not None
         assert product["sku"] == "SKU-1"
-        assert product["model_name"] == "Model A"
+        assert product["brand"] == "Brand"
+        assert product["model"] == "Model A"
         assert product["retail_price"] == 100.0
 
     def test_create_with_optional_fields(self, db: sqlite3.Connection) -> None:
         product = create_product(
             db,
             sku="SKU-2",
-            model_name="Model B",
+            brand="Brand",
+            model="Model B",
             retail_price=200.0,
             color="Red",
             size="Large",
             shopify_product_id="sp-123",
-            shopify_variant_id="sv-456",
         )
         assert product is not None
         assert product["color"] == "Red"
         assert product["size"] == "Large"
         assert product["shopify_product_id"] == "sp-123"
-        assert product["shopify_variant_id"] == "sv-456"
 
     def test_create_duplicate_sku_returns_none(self, db: sqlite3.Connection) -> None:
-        create_product(db, sku="DUP-SKU", model_name="First", retail_price=100.0)
-        result = create_product(db, sku="DUP-SKU", model_name="Second", retail_price=200.0)
+        create_product(db, sku="DUP-SKU", brand="Dup", model="First", retail_price=100.0)
+        result = create_product(db, sku="DUP-SKU", brand="Dup", model="Second", retail_price=200.0)
         assert result is None
 
     def test_create_has_timestamps(self, db: sqlite3.Connection) -> None:
-        product = create_product(db, sku="TS-1", model_name="Timestamped", retail_price=50.0)
+        product = create_product(db, sku="TS-1", brand="Time", model="Stamped", retail_price=50.0)
         assert product is not None
         assert product["created_at"] is not None
         assert product["updated_at"] is not None
@@ -94,7 +94,7 @@ class TestGetProduct:
         assert get_product(db, 99999) is None
 
     def test_get_by_sku(self, db: sqlite3.Connection, sample_product: dict[str, Any]) -> None:
-        result = get_product_by_sku(db, "TREK-VERVE-3-BLU-M")
+        result = get_product_by_sku(db, "TREK-VERVE-3-BLUE-MEDIUM")
         assert result is not None
         assert result["id"] == sample_product["id"]
 
@@ -107,12 +107,12 @@ class TestListProducts:
         assert list_products(db) == []
 
     def test_list_returns_all(self, db: sqlite3.Connection) -> None:
-        create_product(db, sku="A-SKU", model_name="Alpha", retail_price=100.0)
-        create_product(db, sku="B-SKU", model_name="Beta", retail_price=200.0)
+        create_product(db, sku="A-SKU", brand="Alpha", model="Bike", retail_price=100.0)
+        create_product(db, sku="B-SKU", brand="Beta", model="Bike", retail_price=200.0)
         products = list_products(db)
         assert len(products) == 2
-        assert products[0]["model_name"] == "Alpha"
-        assert products[1]["model_name"] == "Beta"
+        assert products[0]["brand"] == "Alpha"
+        assert products[1]["brand"] == "Beta"
 
 
 class TestUpdateProduct:
@@ -140,7 +140,8 @@ class TestUpdateProduct:
     ) -> None:
         updated = update_product(db, sample_product["id"], color="Red")
         assert updated is not None
-        assert updated["model_name"] == sample_product["model_name"]
+        assert updated["brand"] == sample_product["brand"]
+        assert updated["model"] == sample_product["model"]
         assert updated["retail_price"] == sample_product["retail_price"]
 
 
@@ -453,7 +454,8 @@ class TestListBikes:
         bikes = list_bikes(db)
         assert len(bikes) == 1
         assert "sku" in bikes[0]
-        assert "model_name" in bikes[0]
+        assert "brand" in bikes[0]
+        assert "model" in bikes[0]
         assert "color" in bikes[0]
         assert "size" in bikes[0]
         assert "retail_price" in bikes[0]
@@ -462,7 +464,7 @@ class TestListBikes:
         self, db: sqlite3.Connection, sample_product: dict[str, Any]
     ) -> None:
         create_bike(db, serial_number="FB-001", product_id=sample_product["id"], actual_cost=500.0)
-        p2 = create_product(db, sku="OTHER-SKU", model_name="Other", retail_price=999.0)
+        p2 = create_product(db, sku="OTHER-SKU", brand="Other", model="Bike", retail_price=999.0)
         assert p2 is not None
         create_bike(db, serial_number="FB-002", product_id=p2["id"], actual_cost=600.0)
         bikes = list_bikes(db, product_id=sample_product["id"])
@@ -753,7 +755,7 @@ class TestIntegration:
     def test_invoice_to_bikes_flow(self, db: sqlite3.Connection) -> None:
         """Full flow: create product, invoice, items, then bikes."""
         product = create_product(
-            db, sku="INT-SKU-1", model_name="Integration Bike", retail_price=1500.0
+            db, sku="INT-SKU-1", brand="Integration", model="Bike", retail_price=1500.0
         )
         assert product is not None
 

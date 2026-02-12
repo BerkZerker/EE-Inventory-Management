@@ -47,7 +47,7 @@ class TestListProducts:
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data) == 1
-        assert data[0]["sku"] == "TREK-VERVE-3-BLU-M"
+        assert data[0]["sku"] == "TREK-VERVE-3-BLUE-MEDIUM"
 
 
 class TestCreateProduct:
@@ -55,8 +55,8 @@ class TestCreateProduct:
         resp = client.post(
             "/api/products",
             json={
-                "sku": "TEST-SKU-001",
-                "model_name": "Test Bike",
+                "brand": "Test",
+                "model": "Bike",
                 "retail_price": 999.99,
                 "color": "Red",
                 "size": "Large",
@@ -64,8 +64,9 @@ class TestCreateProduct:
         )
         assert resp.status_code == 201
         data = resp.get_json()
-        assert data["sku"] == "TEST-SKU-001"
-        assert data["model_name"] == "Test Bike"
+        assert data["sku"] == "TEST-BIKE-RED-LARGE"
+        assert data["brand"] == "Test"
+        assert data["model"] == "Bike"
         assert data["retail_price"] == 999.99
         assert data["color"] == "Red"
         assert data["size"] == "Large"
@@ -74,9 +75,11 @@ class TestCreateProduct:
         resp = client.post(
             "/api/products",
             json={
-                "sku": "TREK-VERVE-3-BLU-M",
-                "model_name": "Duplicate",
+                "brand": "Trek",
+                "model": "Verve 3",
                 "retail_price": 500.00,
+                "color": "Blue",
+                "size": "Medium",
             },
         )
         assert resp.status_code == 409
@@ -86,7 +89,7 @@ class TestCreateProduct:
     def test_missing_fields(self, client) -> None:
         resp = client.post(
             "/api/products",
-            json={"sku": "INCOMPLETE"},
+            json={"brand": "INCOMPLETE"},
         )
         assert resp.status_code == 400
         data = resp.get_json()
@@ -117,7 +120,8 @@ class TestDeleteProduct:
         product = create_product(
             db,
             sku="DELETE-ME",
-            model_name="Deletable Bike",
+            brand="Delete",
+            model="Me",
             retail_price=500.00,
         )
         resp = client.delete(f"/api/products/{product['id']}")
@@ -169,7 +173,8 @@ class TestUploadInvoice:
             invoice_date="2024-03-15",
             items=[
                 ParsedInvoiceItem(
-                    model="Test Bike Model",
+                    brand="Test",
+                    model="Bike Model",
                     color="Blue",
                     size="Medium",
                     quantity=2,
@@ -220,6 +225,62 @@ class TestUploadInvoice:
         )
         assert resp.status_code == 400
         assert "PDF" in resp.get_json()["error"]
+
+    def test_duplicate_returns_409_with_can_overwrite(self, client, db) -> None:
+        """Uploading a duplicate pending invoice returns 409 with can_overwrite."""
+        parsed = ParsedInvoice(
+            supplier="Test Supplier",
+            invoice_number="INV-DUP-001",
+            invoice_date="2024-03-15",
+            items=[
+                ParsedInvoiceItem(
+                    model="Bike", quantity=1, unit_cost=500, total_cost=500,
+                ),
+            ],
+            total=500.00,
+        )
+
+        with patch("api.routes.parse_invoice_with_retry", return_value=parsed):
+            data = {"file": (io.BytesIO(b"fake pdf"), "invoice.pdf")}
+            resp = client.post("/api/invoices/upload", data=data, content_type="multipart/form-data")
+            assert resp.status_code == 201
+
+            # Upload again — should get 409 with can_overwrite
+            data = {"file": (io.BytesIO(b"fake pdf"), "invoice.pdf")}
+            resp = client.post("/api/invoices/upload", data=data, content_type="multipart/form-data")
+            assert resp.status_code == 409
+            result = resp.get_json()
+            assert result["details"]["can_overwrite"] is True
+
+    def test_overwrite_replaces_pending(self, client, db) -> None:
+        """Uploading with overwrite=true replaces a pending invoice."""
+        parsed = ParsedInvoice(
+            supplier="Test Supplier",
+            invoice_number="INV-OVER-001",
+            invoice_date="2024-03-15",
+            items=[
+                ParsedInvoiceItem(
+                    model="Bike", quantity=1, unit_cost=500, total_cost=500,
+                ),
+            ],
+            total=500.00,
+        )
+
+        with patch("api.routes.parse_invoice_with_retry", return_value=parsed):
+            data = {"file": (io.BytesIO(b"fake pdf"), "invoice.pdf")}
+            resp = client.post("/api/invoices/upload", data=data, content_type="multipart/form-data")
+            assert resp.status_code == 201
+            old_id = resp.get_json()["id"]
+
+            # Re-upload with overwrite
+            data = {
+                "file": (io.BytesIO(b"fake pdf"), "invoice.pdf"),
+                "overwrite": "true",
+            }
+            resp = client.post("/api/invoices/upload", data=data, content_type="multipart/form-data")
+            assert resp.status_code == 201
+            new_id = resp.get_json()["id"]
+            assert new_id != old_id
 
 
 class TestGetInvoice:
@@ -284,8 +345,8 @@ class TestApproveInvoice:
             supplier="Test Supplier",
             invoice_date="2024-02-01",
             total_amount=2000.00,
-            shipping_cost=100.00,
-            discount=20.00,
+            shipping_cost=90.00,
+            discount=0.00,
         )
         create_invoice_items_bulk(
             db,
@@ -318,6 +379,11 @@ class TestApproveInvoice:
         # All items should have allocated_cost set
         for item in data["items"]:
             assert item["allocated_cost"] is not None
+        # Even allocation: $90 shipping / 3 bikes = $30/bike
+        # Item 1 (qty 2, unit $500): allocated = 530.0
+        # Item 2 (qty 1, unit $800): allocated = 830.0
+        assert data["items"][0]["allocated_cost"] == 530.0
+        assert data["items"][1]["allocated_cost"] == 830.0
 
     def test_missing_product_id(self, client, db, sample_invoice_with_items) -> None:
         # The second item in sample_invoice_with_items has no product_id
@@ -356,6 +422,82 @@ class TestRejectInvoice:
         resp = client.post(f"/api/invoices/{sample_invoice['id']}/reject")
         assert resp.status_code == 400
         assert "pending" in resp.get_json()["error"].lower()
+
+
+class TestUpdateInvoice:
+    def test_update_cost_fields(self, client, sample_invoice) -> None:
+        resp = client.put(
+            f"/api/invoices/{sample_invoice['id']}",
+            json={
+                "shipping_cost": 200.0,
+                "discount": 25.0,
+                "credit_card_fees": 15.0,
+                "tax": 50.0,
+                "other_fees": 5.0,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["shipping_cost"] == 200.0
+        assert data["discount"] == 25.0
+        assert data["credit_card_fees"] == 15.0
+        assert data["tax"] == 50.0
+        assert data["other_fees"] == 5.0
+
+    def test_partial_update(self, client, sample_invoice) -> None:
+        resp = client.put(
+            f"/api/invoices/{sample_invoice['id']}",
+            json={"shipping_cost": 99.0},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["shipping_cost"] == 99.0
+
+    def test_not_pending(self, client, db, sample_invoice) -> None:
+        update_invoice_status(db, sample_invoice["id"], "rejected")
+        resp = client.put(
+            f"/api/invoices/{sample_invoice['id']}",
+            json={"shipping_cost": 99.0},
+        )
+        assert resp.status_code == 400
+        assert "pending" in resp.get_json()["error"].lower()
+
+    def test_not_found(self, client) -> None:
+        resp = client.put("/api/invoices/9999", json={"shipping_cost": 1.0})
+        assert resp.status_code == 404
+
+    def test_no_valid_fields(self, client, sample_invoice) -> None:
+        resp = client.put(
+            f"/api/invoices/{sample_invoice['id']}",
+            json={"status": "approved"},
+        )
+        assert resp.status_code == 400
+
+
+class TestGetInvoicePdf:
+    def test_not_found_invoice(self, client) -> None:
+        resp = client.get("/api/invoices/9999/pdf")
+        assert resp.status_code == 404
+
+    def test_no_file_path(self, client, sample_invoice) -> None:
+        # sample_invoice has no file_path
+        resp = client.get(f"/api/invoices/{sample_invoice['id']}/pdf")
+        assert resp.status_code == 404
+
+    def test_success(self, client, db, tmp_path) -> None:
+        # Create a fake PDF file
+        pdf_file = tmp_path / "test.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4 fake content")
+
+        invoice = create_invoice(
+            db,
+            invoice_ref="INV-PDF-TEST",
+            supplier="Test",
+            invoice_date="2024-01-01",
+            file_path=str(pdf_file),
+        )
+        resp = client.get(f"/api/invoices/{invoice['id']}/pdf")
+        assert resp.status_code == 200
+        assert resp.content_type == "application/pdf"
 
 
 # ===========================================================================
@@ -416,7 +558,7 @@ class TestInventorySummary:
         # Find the product with our bike
         found = False
         for entry in data:
-            if entry["sku"] == "TREK-VERVE-3-BLU-M":
+            if entry["sku"] == "TREK-VERVE-3-BLUE-MEDIUM":
                 assert entry["total_bikes"] == 1
                 assert entry["available"] == 1
                 found = True

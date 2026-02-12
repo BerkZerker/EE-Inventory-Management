@@ -57,8 +57,9 @@ def sample_product(db: sqlite3.Connection) -> dict[str, Any]:
     """Insert and return a Trek Verve 3 test product."""
     product = create_product(
         db,
-        sku="TREK-VERVE-3-BLU-M",
-        model_name="Trek Verve 3",
+        sku="TREK-VERVE-3-BLUE-MEDIUM",
+        brand="Trek",
+        model="Verve 3",
         retail_price=1299.99,
         color="Blue",
         size="Medium",

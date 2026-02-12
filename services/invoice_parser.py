@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class ParsedInvoiceItem(BaseModel):
     """A single line item extracted from an invoice."""
 
+    brand: str | None = None
     model: str
     color: str | None = None
     size: str | None = None
@@ -45,6 +46,9 @@ class ParsedInvoice(BaseModel):
     items: list[ParsedInvoiceItem]
     shipping_cost: float = 0.0
     discount: float = 0.0
+    credit_card_fees: float = 0.0
+    tax: float = 0.0
+    other_fees: float = 0.0
     total: float = 0.0
 
 
@@ -59,8 +63,10 @@ class ParseError(Exception):
 _PARSE_PROMPT = (
     "Extract all invoice data from this PDF. "
     "Return the supplier name, invoice number, invoice date (YYYY-MM-DD format), "
-    "each line item with model name, color, size, quantity, unit cost, and total cost, "
-    "plus shipping cost, discount, and invoice total."
+    "each line item with brand (manufacturer), model name, color, size, quantity, "
+    "unit cost, and total cost, "
+    "plus shipping cost, discount, credit card fees, tax, other fees/surcharges, "
+    "and invoice total."
 )
 
 
@@ -139,39 +145,48 @@ def allocate_costs(
     items: list[ParsedInvoiceItem],
     shipping: float,
     discount: float,
+    credit_card_fees: float = 0.0,
+    tax: float = 0.0,
+    other_fees: float = 0.0,
 ) -> list[float]:
     """Return per-unit allocated cost for each item.
 
-    Distributes shipping and discount proportionally across items based on
-    their total_cost relative to the subtotal.  The last item absorbs any
-    rounding remainder so the total is penny-accurate.
+    Even distribution across all bikes:
+      total_extras = shipping + credit_card_fees + tax + other_fees - discount
+      extra_per_bike = total_extras / total_bike_count
+      allocated_cost_per_bike = unit_cost + extra_per_bike
 
-    Raises ValueError if subtotal is zero.
+    The last bike absorbs any rounding remainder so the total is penny-accurate.
+
+    Raises ValueError if total bike count is zero.
     """
-    subtotal = sum(item.total_cost for item in items)
-    if subtotal == 0:
-        msg = "Cannot allocate costs: subtotal is zero"
+    total_bikes = sum(item.quantity for item in items)
+    if total_bikes == 0:
+        msg = "Cannot allocate costs: total bike count is zero"
         raise ValueError(msg)
 
-    net_adjustment = shipping - discount
-    expected_total = subtotal + net_adjustment
+    total_extras = shipping + credit_card_fees + tax + other_fees - discount
+    extra_per_bike = round(total_extras / total_bikes, 2)
 
     per_unit_costs: list[float] = []
     for item in items:
-        proportion = item.total_cost / subtotal
-        per_unit = (item.total_cost + proportion * net_adjustment) / item.quantity
-        per_unit_costs.append(round(per_unit, 2))
+        per_unit = round(item.unit_cost + extra_per_bike, 2)
+        per_unit_costs.append(per_unit)
 
-    # Penny-accurate adjustment: fix rounding on last item
-    actual_total = sum(
-        cost * item.quantity for cost, item in zip(per_unit_costs, items)
-    )
-    remainder = round(expected_total - actual_total, 2)
-    if remainder != 0 and items:
-        last_item = items[-1]
-        per_unit_costs[-1] = round(
-            per_unit_costs[-1] + remainder / last_item.quantity, 2
+    # Penny-accurate adjustment: compute last item's per-unit from the
+    # remaining balance so the grand total is exact.
+    if len(items) > 0:
+        subtotal = sum(item.total_cost for item in items)
+        expected_total = subtotal + total_extras
+        non_last_total = sum(
+            cost * item.quantity
+            for cost, item in zip(per_unit_costs[:-1], items[:-1])
         )
+        last_item = items[-1]
+        last_per_unit = round(
+            (expected_total - non_last_total) / last_item.quantity, 2
+        )
+        per_unit_costs[-1] = last_per_unit
 
     return per_unit_costs
 
@@ -190,8 +205,9 @@ def match_to_catalog(
     """Score each catalog product against the parsed item and return best match.
 
     Scoring:
-      - Model name exact match (case-insensitive): +5
-      - Model name substring match (case-insensitive): +3  (required minimum)
+      - Brand exact match (case-insensitive): +3
+      - Model exact match (case-insensitive): +5
+      - Model substring match (case-insensitive): +3  (required minimum)
       - Color match (case-insensitive): +2
       - Size match (case-insensitive): +2
 
@@ -201,13 +217,14 @@ def match_to_catalog(
     best_id: int | None = None
     best_score = 0
 
+    item_brand = (item.brand or "").lower()
     item_model = item.model.lower()
     item_color = (item.color or "").lower()
     item_size = (item.size or "").lower()
 
     for product in catalog:
         score = 0
-        product_model = (product.get("model_name") or "").lower()
+        product_model = (product.get("model") or "").lower()
 
         if not product_model:
             continue
@@ -220,6 +237,11 @@ def match_to_catalog(
         else:
             # No model match at all — skip this product
             continue
+
+        # Brand match
+        product_brand = (product.get("brand") or "").lower()
+        if item_brand and product_brand and item_brand == product_brand:
+            score += 3
 
         # Color match
         product_color = (product.get("color") or "").lower()

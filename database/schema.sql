@@ -1,13 +1,13 @@
 -- E-Bike Inventory Management System — Database Schema
 -- All tables use CREATE TABLE IF NOT EXISTS for idempotent re-runs.
 
--- Products master list (one per bike model)
+-- Products master list (one per bike model/color/size combo)
 CREATE TABLE IF NOT EXISTS products (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    sku             TEXT NOT NULL UNIQUE,                 -- TREK-VERVE-3-BLU-M
+    sku             TEXT NOT NULL UNIQUE,                 -- TREK-VERVE3-BLU-M
     shopify_product_id TEXT,
-    shopify_variant_id TEXT,                              -- Base variant (optional)
-    model_name      TEXT NOT NULL,                        -- "Trek Verve 3"
+    brand           TEXT NOT NULL,                        -- "Trek"
+    model           TEXT NOT NULL,                        -- "Verve 3"
     color           TEXT,
     size            TEXT,
     retail_price    REAL NOT NULL DEFAULT 0,
@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS invoices (
     total_amount    REAL,
     shipping_cost   REAL DEFAULT 0,
     discount        REAL DEFAULT 0,
+    credit_card_fees REAL DEFAULT 0,
+    tax             REAL DEFAULT 0,
+    other_fees      REAL DEFAULT 0,
     file_path       TEXT,                                 -- Path to original PDF
     parsed_data     TEXT,                                 -- Raw JSON from AI parser
     status          TEXT NOT NULL DEFAULT 'pending'       -- pending | approved | rejected

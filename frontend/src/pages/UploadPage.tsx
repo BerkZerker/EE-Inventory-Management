@@ -4,27 +4,47 @@ import apiClient from "@/api/client";
 
 export default function UploadPage() {
   const [dragOver, setDragOver] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  const upload = async (file: File) => {
+  const selectFile = (file: File) => {
     setError(null);
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       setError("Only PDF files are accepted.");
       return;
     }
+    setSelectedFile(file);
+  };
+
+  const clearFile = () => {
+    setSelectedFile(null);
+    setError(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const submit = async (overwrite = false) => {
+    if (!selectedFile) return;
+    setError(null);
     setUploading(true);
     try {
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", selectedFile);
+      if (overwrite) form.append("overwrite", "true");
       const resp = await apiClient.post("/invoices/upload", form);
       navigate(`/invoices/${resp.data.id}`);
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "Upload failed";
+      const resp = (err as { response?: { data?: { error?: string; details?: { can_overwrite?: boolean } }; status?: number } })?.response;
+      if (resp?.status === 409 && resp?.data?.details?.can_overwrite) {
+        if (confirm(`${resp.data.error}\n\nOverwrite the existing pending invoice?`)) {
+          setUploading(false);
+          submit(true);
+          return;
+        }
+      }
+      const msg = resp?.data?.error ?? "Upload failed";
       setError(msg);
     } finally {
       setUploading(false);
@@ -35,12 +55,18 @@ export default function UploadPage() {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    if (file) upload(file);
+    if (file) selectFile(file);
   };
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) upload(file);
+    if (file) selectFile(file);
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   return (
@@ -60,13 +86,31 @@ export default function UploadPage() {
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
-        onClick={() => fileRef.current?.click()}
+        onClick={() => !selectedFile && !uploading && fileRef.current?.click()}
+        style={selectedFile ? { cursor: "default" } : undefined}
       >
-        <div className="icon">+</div>
-        {uploading ? (
-          <p>Uploading and parsing...</p>
+        {selectedFile ? (
+          <div>
+            <div className="icon">&#128196;</div>
+            <p>
+              <strong>{selectedFile.name}</strong>
+            </p>
+            <p>{formatSize(selectedFile.size)}</p>
+            {!uploading && (
+              <button
+                style={{ marginTop: "0.75rem" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearFile();
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         ) : (
           <>
+            <div className="icon">+</div>
             <p>
               <strong>Drag &amp; drop</strong> a PDF here, or click to browse
             </p>
@@ -74,6 +118,25 @@ export default function UploadPage() {
           </>
         )}
       </div>
+
+      {selectedFile && (
+        <div style={{ marginTop: "1rem", textAlign: "center" }}>
+          <button
+            className="primary"
+            disabled={uploading}
+            onClick={submit}
+            style={{ minWidth: "200px", padding: "0.75em 1.5em" }}
+          >
+            {uploading ? (
+              <span>
+                <span className="spinner" /> Parsing invoice with AI...
+              </span>
+            ) : (
+              "Submit for Processing"
+            )}
+          </button>
+        </div>
+      )}
 
       <input
         ref={fileRef}

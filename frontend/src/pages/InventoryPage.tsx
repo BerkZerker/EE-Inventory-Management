@@ -89,7 +89,7 @@ export default function InventoryPage() {
               {summary.map((s) => (
                 <tr key={s.product_id}>
                   <td>{s.sku}</td>
-                  <td>{s.model_name}</td>
+                  <td>{s.brand} {s.model}</td>
                   <td>{s.total_bikes}</td>
                   <td>{s.available}</td>
                   <td>{s.sold}</td>
@@ -152,7 +152,7 @@ export default function InventoryPage() {
             {bikes.map((bike) => (
               <tr key={bike.id}>
                 <td>{bike.serial_number}</td>
-                <td>{bike.model_name ?? "N/A"}</td>
+                <td>{bike.brand ?? ""} {bike.model ?? "N/A"}</td>
                 <td>
                   <span className={`badge ${bike.status}`}>{bike.status}</span>
                 </td>

@@ -126,197 +126,112 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Product sync
+# Ensure Shopify product exists (push-based sync)
 # ---------------------------------------------------------------------------
 
-_SYNC_PRODUCTS_QUERY = """
-query SyncProducts($cursor: String) {
-  products(first: 50, after: $cursor) {
+_SEARCH_PRODUCTS_QUERY = """
+query SearchProducts($query: String!) {
+  products(first: 5, query: $query) {
     edges {
       node {
         id
         title
-        variants(first: 100) {
-          edges {
-            node {
-              id
-              sku
-              price
-              inventoryItem {
-                unitCost {
-                  amount
-                }
-              }
-            }
-          }
-        }
       }
     }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
   }
 }
 """
 
-
-def sync_products_from_shopify() -> int:
-    """Import / update products from Shopify into the local database.
-
-    Pages through all products and upserts each variant with a SKU.
-    Deletes local products that no longer exist in Shopify (only if they
-    have no associated bikes).
-    Returns the number of products synced.
-    """
-    conn = get_db(settings.database_path)
-    try:
-        cursor: str | None = None
-        synced = 0
-        seen_skus: set[str] = set()
-
-        while True:
-            variables: dict = {"cursor": cursor}
-            data = _graphql_request(_SYNC_PRODUCTS_QUERY, variables)
-
-            products_data = data["products"]
-            for edge in products_data["edges"]:
-                node = edge["node"]
-                product_gid = node["id"]
-                model_name = node["title"]
-
-                for variant_edge in node["variants"]["edges"]:
-                    variant = variant_edge["node"]
-                    sku = variant.get("sku")
-                    if not sku:
-                        continue
-
-                    seen_skus.add(sku)
-                    price = float(variant["price"])
-                    cost = None
-                    try:
-                        cost = float(variant["inventoryItem"]["unitCost"]["amount"])
-                    except (KeyError, TypeError):
-                        pass
-
-                    existing = models.get_product_by_sku(conn, sku)
-                    if existing:
-                        models.update_product(
-                            conn,
-                            existing["id"],
-                            model_name=model_name,
-                            retail_price=price,
-                        )
-                    else:
-                        models.create_product(
-                            conn,
-                            sku=sku,
-                            model_name=model_name,
-                            retail_price=price,
-                            shopify_product_id=product_gid,
-                        )
-                    synced += 1
-
-            page_info = products_data["pageInfo"]
-            if not page_info["hasNextPage"]:
-                break
-            cursor = page_info["endCursor"]
-
-        # Remove local products that were deleted from Shopify
-        local_products = models.list_products(conn)
-        removed = 0
-        for product in local_products:
-            if product["sku"] not in seen_skus and product.get("shopify_product_id"):
-                # Only delete if no bikes reference this product
-                bike_count = conn.execute(
-                    "SELECT COUNT(*) FROM bikes WHERE product_id = ?",
-                    (product["id"],),
-                ).fetchone()[0]
-                if bike_count == 0:
-                    models.delete_product(conn, product["id"])
-                    removed += 1
-                else:
-                    logger.info(
-                        "Keeping deleted Shopify product %s (%s) - has %d bikes",
-                        product["sku"], product["model_name"], bike_count,
-                    )
-
-        if removed:
-            logger.info("Removed %d products no longer in Shopify", removed)
-
-        return synced
-    finally:
-        conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Serial option management
-# ---------------------------------------------------------------------------
-
-_GET_PRODUCT_OPTIONS_QUERY = """
-query GetProductOptions($id: ID!) {
-  product(id: $id) {
-    options {
-      id
-      name
-    }
-  }
-}
-"""
-
-_ADD_SERIAL_OPTION_MUTATION = """
-mutation AddSerialOption($productId: ID!, $options: [OptionCreateInput!]!) {
-  productOptionsCreate(productId: $productId, options: $options) {
+_CREATE_PRODUCT_MUTATION = """
+mutation CreateProduct($input: ProductInput!) {
+  productCreate(input: $input) {
     userErrors {
       field
       message
     }
     product {
-      options {
-        id
-        name
-      }
+      id
+      title
     }
   }
 }
 """
 
 
-def ensure_serial_option(shopify_product_id: str) -> str:
-    """Ensure a 'Serial' option exists on the Shopify product.
+def ensure_shopify_product(conn, product: dict) -> str | None:
+    """Ensure a Shopify product exists for this brand+model.
 
-    Returns the option ID.
+    1. Check if sibling products (same brand+model) already have a shopify_product_id.
+    2. If not, search Shopify by title "Brand Model".
+    3. If not found, create a new Shopify product with 3 options (Color, Size, Serial).
+    4. Save shopify_product_id on all sibling products.
+
+    Returns the shopify_product_id or None on failure.
     """
-    data = _graphql_request(
-        _GET_PRODUCT_OPTIONS_QUERY,
-        {"id": shopify_product_id},
-    )
-    options = data["product"]["options"]
+    brand = product.get("brand", "")
+    model = product.get("model", "")
+    title = f"{brand} {model}".strip()
 
-    for opt in options:
-        if opt["name"] == "Serial":
-            return opt["id"]
+    if not title:
+        return None
 
-    # Create the Serial option
-    data = _graphql_request(
-        _ADD_SERIAL_OPTION_MUTATION,
-        {
-            "productId": shopify_product_id,
-            "options": [{"name": "Serial", "values": [{"name": "Default"}]}],
-        },
-    )
+    # 1. Check siblings for existing shopify_product_id
+    siblings = models.get_products_by_brand_model(conn, brand, model)
+    for sib in siblings:
+        if sib.get("shopify_product_id"):
+            # Propagate to all siblings that don't have it yet
+            for s in siblings:
+                if not s.get("shopify_product_id"):
+                    models.update_product(
+                        conn, s["id"],
+                        shopify_product_id=sib["shopify_product_id"],
+                    )
+            return sib["shopify_product_id"]
 
-    result = data["productOptionsCreate"]
-    if result["userErrors"]:
-        msg = f"Failed to create Serial option: {result['userErrors']}"
-        raise RuntimeError(msg)
+    # 2. Search Shopify by title
+    try:
+        data = _graphql_request(
+            _SEARCH_PRODUCTS_QUERY,
+            {"query": f"title:'{title}'"},
+        )
+        for edge in data["products"]["edges"]:
+            if edge["node"]["title"].lower() == title.lower():
+                shopify_pid = edge["node"]["id"]
+                for s in siblings:
+                    models.update_product(
+                        conn, s["id"], shopify_product_id=shopify_pid,
+                    )
+                return shopify_pid
+    except Exception:
+        logger.warning("Shopify product search failed for '%s'", title)
 
-    for opt in result["product"]["options"]:
-        if opt["name"] == "Serial":
-            return opt["id"]
+    # 3. Create new Shopify product with 3 options
+    try:
+        data = _graphql_request(
+            _CREATE_PRODUCT_MUTATION,
+            {
+                "input": {
+                    "title": title,
+                    "productOptions": [
+                        {"name": "Color", "values": [{"name": "Default"}]},
+                        {"name": "Size", "values": [{"name": "Default"}]},
+                        {"name": "Serial", "values": [{"name": "Default"}]},
+                    ],
+                }
+            },
+        )
+        result = data["productCreate"]
+        if result["userErrors"]:
+            logger.warning("Shopify product creation errors: %s", result["userErrors"])
+            return None
 
-    msg = "Serial option not found after creation"
-    raise RuntimeError(msg)
+        shopify_pid = result["product"]["id"]
+        for s in siblings:
+            models.update_product(conn, s["id"], shopify_product_id=shopify_pid)
+        return shopify_pid
+    except Exception:
+        logger.exception("Failed to create Shopify product '%s'", title)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -367,19 +282,26 @@ mutation CreateVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!
 def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
     """Create Shopify variants for a list of bikes under a product.
 
-    Each bike becomes a variant keyed by serial number. After creation,
-    the local bike records are updated with their Shopify variant IDs.
+    Each bike becomes a variant with 3 option values: Color, Size, Serial.
+    After creation, the local bike records are updated with their Shopify
+    variant IDs.
 
     Returns the list of created variant dicts from Shopify.
     """
     shopify_product_id = product["shopify_product_id"]
-    ensure_serial_option(shopify_product_id)
     location_id = _get_location_id()
+
+    color = product.get("color") or "Default"
+    size = product.get("size") or "Default"
 
     variants_input = []
     for bike in bikes:
         variants_input.append({
-            "optionValues": [{"optionName": "Serial", "name": bike["serial_number"]}],
+            "optionValues": [
+                {"optionName": "Color", "name": color},
+                {"optionName": "Size", "name": size},
+                {"optionName": "Serial", "name": bike["serial_number"]},
+            ],
             "price": str(product["retail_price"]),
             "inventoryItem": {
                 "cost": bike["actual_cost"],
