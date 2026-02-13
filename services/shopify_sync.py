@@ -133,8 +133,12 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
     try:
         available = result["extensions"]["cost"]["throttleStatus"]["currentlyAvailable"]
         if available < RATE_LIMIT_AVAILABLE_THRESHOLD:
-            wait = max(1.0, RATE_LIMIT_AVAILABLE_THRESHOLD - available) / RATE_LIMIT_RECOVERY_FACTOR
-            logger.warning("Shopify rate limit low (%s available), sleeping %.1fs", available, wait)
+            wait = (
+                max(1.0, RATE_LIMIT_AVAILABLE_THRESHOLD - available) / RATE_LIMIT_RECOVERY_FACTOR
+            )
+            logger.warning(
+                "Shopify rate limit low (%s available), sleeping %.1fs", available, wait
+            )
             time.sleep(wait)
     except (KeyError, TypeError):
         pass
@@ -145,6 +149,7 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 # Ensure Shopify product exists (push-based sync)
 # ---------------------------------------------------------------------------
+
 
 def ensure_shopify_product(conn, product: dict) -> str | None:
     """Ensure a Shopify product exists for this brand+model.
@@ -171,7 +176,8 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
             for s in siblings:
                 if not s.get("shopify_product_id"):
                     models.update_product(
-                        conn, s["id"],
+                        conn,
+                        s["id"],
                         shopify_product_id=sib["shopify_product_id"],
                     )
             return sib["shopify_product_id"]
@@ -187,13 +193,13 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
                 shopify_pid = edge["node"]["id"]
                 for s in siblings:
                     models.update_product(
-                        conn, s["id"], shopify_product_id=shopify_pid,
+                        conn,
+                        s["id"],
+                        shopify_product_id=shopify_pid,
                     )
                 return shopify_pid
     except Exception as exc:
-        raise ShopifySyncError(
-            f"Shopify product search failed for '{title}'"
-        ) from exc
+        raise ShopifySyncError(f"Shopify product search failed for '{title}'") from exc
 
     # 3. Create new Shopify product with 3 options
     try:
@@ -224,14 +230,13 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
     except ShopifySyncError:
         raise
     except Exception as exc:
-        raise ShopifySyncError(
-            f"Failed to create Shopify product '{title}'"
-        ) from exc
+        raise ShopifySyncError(f"Failed to create Shopify product '{title}'") from exc
 
 
 # ---------------------------------------------------------------------------
 # Location ID
 # ---------------------------------------------------------------------------
+
 
 def _get_location_id() -> str:
     """Return the first Shopify location ID, caching the result."""
@@ -251,6 +256,7 @@ def _get_location_id() -> str:
 # ---------------------------------------------------------------------------
 # Variant creation
 # ---------------------------------------------------------------------------
+
 
 def _delete_default_variant(shopify_product_id: str) -> bool:
     """Delete the placeholder Default/Default/Default variant if present.
@@ -313,25 +319,27 @@ def create_variants_for_bikes(
 
     variants_input = []
     for bike in bikes:
-        variants_input.append({
-            "optionValues": [
-                {"optionName": "Color", "name": color},
-                {"optionName": "Size", "name": size},
-                {"optionName": "Serial", "name": bike["serial_number"]},
-            ],
-            "price": str(product["retail_price"]),
-            "inventoryItem": {
-                "cost": bike["actual_cost"],
-                "sku": bike["serial_number"],
-                "tracked": True,
-            },
-            "inventoryQuantities": [
-                {
-                    "locationId": location_id,
-                    "availableQuantity": 1,
+        variants_input.append(
+            {
+                "optionValues": [
+                    {"optionName": "Color", "name": color},
+                    {"optionName": "Size", "name": size},
+                    {"optionName": "Serial", "name": bike["serial_number"]},
+                ],
+                "price": str(product["retail_price"]),
+                "inventoryItem": {
+                    "cost": bike["actual_cost"],
+                    "sku": bike["serial_number"],
+                    "tracked": True,
                 },
-            ],
-        })
+                "inventoryQuantities": [
+                    {
+                        "locationId": location_id,
+                        "availableQuantity": 1,
+                    },
+                ],
+            }
+        )
 
     data = _graphql_request(
         CREATE_VARIANTS_MUTATION,
@@ -370,6 +378,7 @@ def create_variants_for_bikes(
 # Archive sold variants
 # ---------------------------------------------------------------------------
 
+
 def archive_sold_variants(product_id: int) -> int:
     """Delete Shopify variants for sold bikes and clear local references.
 
@@ -378,10 +387,7 @@ def archive_sold_variants(product_id: int) -> int:
     conn = get_db(settings.database_path)
     try:
         sold_bikes = models.list_bikes(conn, product_id=product_id, status="sold")
-        to_delete = [
-            b for b in sold_bikes
-            if b.get("shopify_variant_id")
-        ]
+        to_delete = [b for b in sold_bikes if b.get("shopify_variant_id")]
 
         if not to_delete:
             return 0

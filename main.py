@@ -77,7 +77,9 @@ def receive_invoice(pdf_path: str) -> None:
     print(f"Total:      ${parsed.total:.2f}")
     print(f"\nItems ({len(parsed.items)}):")
     for i, item in enumerate(parsed.items, 1):
-        print(f"  {i}. {item.model} (qty {item.quantity}) @ ${item.unit_cost:.2f} = ${item.total_cost:.2f}")
+        print(
+            f"  {i}. {item.model} (qty {item.quantity}) @ ${item.unit_cost:.2f} = ${item.total_cost:.2f}"
+        )
 
     if not click.confirm("\nApprove this invoice?"):
         print("Invoice not approved.")
@@ -106,13 +108,15 @@ def receive_invoice(pdf_path: str) -> None:
         item_dicts = []
         for item in parsed.items:
             product_id = match_to_catalog(item, catalog)
-            item_dicts.append({
-                "description": item.model,
-                "quantity": item.quantity,
-                "unit_cost": item.unit_cost,
-                "total_cost": item.total_cost,
-                "product_id": product_id,
-            })
+            item_dicts.append(
+                {
+                    "description": item.model,
+                    "quantity": item.quantity,
+                    "unit_cost": item.unit_cost,
+                    "total_cost": item.total_cost,
+                    "product_id": product_id,
+                }
+            )
 
         models.create_invoice_items_bulk(conn, invoice["id"], item_dicts)
 
@@ -155,7 +159,9 @@ def generate_serials(count: int, sku: str) -> None:
         ]
         models.create_bikes_bulk(conn, bike_dicts)
 
-        print(f"Generated {count} serial(s) for {product.get('brand', '')} {product.get('model', '')} ({sku}):")
+        print(
+            f"Generated {count} serial(s) for {product.get('brand', '')} {product.get('model', '')} ({sku}):"
+        )
         for serial in serials:
             print(f"  {serial}")
     finally:
@@ -208,9 +214,10 @@ def inventory(available: bool, sold: bool, damaged: bool) -> None:
         print("-" * 80)
         for bike in bikes:
             sale = f"${bike['sale_price']:.2f}" if bike.get("sale_price") else "-"
+            model_name = f"{bike.get('brand', '')} {bike.get('model', 'N/A')}".strip()
             print(
                 f"{bike['serial_number']:<16} "
-                f"{f'{bike.get(\"brand\", \"\")} {bike.get(\"model\", \"N/A\")}'.strip():<30} "
+                f"{model_name:<30} "
                 f"{bike['status']:<10} "
                 f"${bike['actual_cost']:>9.2f} "
                 f"{sale:>10}"
@@ -242,11 +249,14 @@ def report(start: str, end: str) -> None:
         print(f"  Margin:        {summary['margin_pct']:.1f}%")
 
         if by_product:
-            print(f"\n{'Product':<30} {'Sold':>6} {'Revenue':>12} {'Cost':>12} {'Profit':>12} {'Margin':>8}")
+            print(
+                f"\n{'Product':<30} {'Sold':>6} {'Revenue':>12} {'Cost':>12} {'Profit':>12} {'Margin':>8}"
+            )
             print("-" * 80)
             for row in by_product:
+                product_name = f"{row.get('brand', '')} {row.get('model', '')}".strip()
                 print(
-                    f"{f'{row.get(\"brand\", \"\")} {row.get(\"model\", \"\")}'.strip():<30} "
+                    f"{product_name:<30} "
                     f"{row['units_sold']:>6} "
                     f"${row['total_revenue']:>11,.2f} "
                     f"${row['total_cost']:>11,.2f} "
@@ -322,10 +332,13 @@ def register_webhook(callback_url: str) -> None:
     }
     """
 
-    data = _graphql_request(mutation, {
-        "topic": "ORDERS_CREATE",
-        "webhookSubscription": {"uri": callback_url},
-    })
+    data = _graphql_request(
+        mutation,
+        {
+            "topic": "ORDERS_CREATE",
+            "webhookSubscription": {"uri": callback_url},
+        },
+    )
 
     result = data["webhookSubscriptionCreate"]
     if result["userErrors"]:
