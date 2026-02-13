@@ -1,21 +1,23 @@
 import { useState, useEffect } from "react";
-import apiClient from "@/api/client";
+import { bikeApi } from "@/api/services";
+import { extractErrorMessage } from "@/api/errors";
 import type { InventorySummary, Bike } from "@/types";
 
 export default function InventoryPage() {
   const [summary, setSummary] = useState<InventorySummary[]>([]);
   const [bikes, setBikes] = useState<Bike[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [searchSerial, setSearchSerial] = useState("");
 
   useEffect(() => {
     const load = async () => {
       try {
-        const resp = await apiClient.get("/inventory/summary");
+        const resp = await bikeApi.summary();
         setSummary(resp.data);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        setError(extractErrorMessage(err, "Failed to load inventory summary"));
       }
     };
     load();
@@ -24,14 +26,15 @@ export default function InventoryPage() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      setError(null);
       try {
         const params: Record<string, string> = {};
         if (searchSerial) params.search = searchSerial;
         else if (statusFilter) params.status = statusFilter;
-        const resp = await apiClient.get("/bikes", { params });
+        const resp = await bikeApi.list(params);
         setBikes(resp.data);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        setError(extractErrorMessage(err, "Failed to load bikes"));
       } finally {
         setLoading(false);
       }
@@ -54,6 +57,8 @@ export default function InventoryPage() {
         <h2>Inventory</h2>
         <p>Manage bike inventory and track status.</p>
       </div>
+
+      {error && <div className="error-message">{error}</div>}
 
       <div className="stats-grid">
         <div className="stat-card">

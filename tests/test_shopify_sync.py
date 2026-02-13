@@ -4,28 +4,26 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any
 from unittest.mock import patch
 
 import pytest
 import responses
 
+from api.exceptions import ShopifySyncError
 from database.models import (
     create_bike,
     create_product,
     get_bike,
     get_product,
-    list_bikes,
-    update_bike,
     update_bike_status,
 )
 from services.shopify_sync import (
-    _get_location_id,
     _graphql_request,
     archive_sold_variants,
     create_variants_for_bikes,
     ensure_shopify_product,
 )
+from tests.conftest import _NoCloseConnection
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,22 +43,6 @@ class _MockSettings:
     shopify_webhook_secret = ""
     serial_prefix = "BIKE"
     database_path = ":memory:"
-
-
-class _NoCloseConnection:
-    """Wrapper around a sqlite3.Connection that ignores .close() calls."""
-
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        object.__setattr__(self, "_conn", conn)
-
-    def close(self) -> None:  # noqa: D102
-        pass
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._conn, name)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        setattr(self._conn, name, value)
 
 
 def _good_extensions(available: int = 1000) -> dict:
@@ -130,7 +112,7 @@ class TestGraphqlRequest:
 
     @responses.activate
     def test_graphql_errors_raises(self) -> None:
-        """GraphQL-level errors should raise RuntimeError."""
+        """GraphQL-level errors should raise ShopifySyncError."""
         responses.add(
             responses.POST,
             SHOPIFY_GRAPHQL_URL,
@@ -140,7 +122,7 @@ class TestGraphqlRequest:
             status=200,
         )
 
-        with pytest.raises(RuntimeError, match="GraphQL errors"):
+        with pytest.raises(ShopifySyncError, match="GraphQL errors"):
             _graphql_request("{ products { id } }")
 
     @responses.activate

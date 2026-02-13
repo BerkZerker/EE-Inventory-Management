@@ -42,28 +42,40 @@ def verify_shopify_webhook(data: bytes, hmac_header: str) -> bool:
 
 
 def _process_order(conn, payload: dict) -> None:
-    """Process order line items - mark matching bikes as sold."""
+    """Process order line items - mark matching bikes as sold.
+
+    All bike status updates run in a single transaction so a partial
+    failure rolls back cleanly.  We use ``mark_bike_sold`` with
+    ``commit=False`` and issue a single commit at the end.
+    """
     order_id = str(payload.get("id", ""))
     line_items = payload.get("line_items", [])
 
-    for item in line_items:
-        sku = item.get("sku", "")
-        if not sku or not sku.startswith("BIKE-"):
-            continue
+    try:
+        for item in line_items:
+            sku = item.get("sku", "")
+            if not sku or not sku.startswith(settings.serial_prefix + "-"):
+                continue
 
-        price = None
-        price_str = item.get("price")
-        if price_str:
-            try:
-                price = float(price_str)
-            except (ValueError, TypeError):
-                pass
+            price = None
+            price_str = item.get("price")
+            if price_str:
+                try:
+                    price = float(price_str)
+                except (ValueError, TypeError):
+                    pass
 
-        result = models.mark_bike_sold(conn, sku, sale_price=price, shopify_order_id=order_id)
-        if result:
-            logger.info("Marked bike %s as sold (order %s)", sku, order_id)
-        else:
-            logger.warning("Bike not found for SKU %s (order %s)", sku, order_id)
+            result = models.mark_bike_sold(
+                conn, sku, sale_price=price, shopify_order_id=order_id, commit=False,
+            )
+            if result:
+                logger.info("Marked bike %s as sold (order %s)", sku, order_id)
+            else:
+                logger.warning("Bike not found for SKU %s (order %s)", sku, order_id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def create_webhook_app() -> Flask:

@@ -1,22 +1,24 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import apiClient from "@/api/client";
+import { invoiceApi } from "@/api/services";
+import { extractErrorMessage } from "@/api/errors";
 import type { Invoice } from "@/types";
 
 export default function InvoiceListPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      setError(null);
       try {
-        const params = statusFilter ? { status: statusFilter } : {};
-        const resp = await apiClient.get("/invoices", { params });
+        const resp = await invoiceApi.list(statusFilter || undefined);
         setInvoices(resp.data);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        setError(extractErrorMessage(err, "Failed to load invoices"));
       } finally {
         setLoading(false);
       }
@@ -30,6 +32,8 @@ export default function InvoiceListPage() {
         <h2>Invoices</h2>
         <p>View and manage supplier invoices.</p>
       </div>
+
+      {error && <div className="error-message">{error}</div>}
 
       <div className="toolbar">
         <Link to="/upload">

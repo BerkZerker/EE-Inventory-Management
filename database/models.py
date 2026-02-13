@@ -501,7 +501,9 @@ def create_bikes_bulk(
     bikes: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Insert multiple bikes in one batch and return them."""
-    ids_before = {r["id"] for r in conn.execute("SELECT id FROM bikes").fetchall()}
+    if not bikes:
+        return []
+    max_id_before = conn.execute("SELECT COALESCE(MAX(id), 0) FROM bikes").fetchone()[0]
     rows_data = [
         (
             b["serial_number"],
@@ -524,15 +526,10 @@ def create_bikes_bulk(
         rows_data,
     )
     conn.commit()
-    ids_after = {r["id"] for r in conn.execute("SELECT id FROM bikes").fetchall()}
-    new_ids = sorted(ids_after - ids_before)
-    if not new_ids:
-        return []
-    placeholders = ",".join("?" * len(new_ids))
     return _rows_to_list(
         conn.execute(
-            f"SELECT * FROM bikes WHERE id IN ({placeholders}) ORDER BY id",  # noqa: S608
-            new_ids,
+            "SELECT * FROM bikes WHERE id > ? ORDER BY id",
+            (max_id_before,),
         ).fetchall()
     )
 
@@ -557,7 +554,7 @@ def list_bikes(
     product_id: int | None = None,
     status: str | None = None,
     invoice_id: int | None = None,
-    limit: int | None = None,
+    limit: int | None = 500,
     offset: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return bikes with product info, optionally filtered and paginated."""
@@ -601,6 +598,7 @@ def update_bike_status(
     sale_price: float | None = None,
     shopify_order_id: str | None = None,
     date_sold: str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any] | None:
     """Update a bike's status with optional sale info."""
     if status not in _VALID_BIKE_STATUSES:
@@ -622,7 +620,8 @@ def update_bike_status(
             "UPDATE bikes SET status = ? WHERE id = ?",
             (status, bike_id),
         )
-    conn.commit()
+    if commit:
+        conn.commit()
     return get_bike(conn, bike_id)
 
 
@@ -631,6 +630,7 @@ def mark_bike_sold(
     serial_number: str,
     sale_price: float | None = None,
     shopify_order_id: str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any] | None:
     """Find a bike by serial number and mark it as sold."""
     bike = get_bike_by_serial(conn, serial_number)
@@ -642,6 +642,7 @@ def mark_bike_sold(
         "sold",
         sale_price=sale_price,
         shopify_order_id=shopify_order_id,
+        commit=commit,
     )
 
 

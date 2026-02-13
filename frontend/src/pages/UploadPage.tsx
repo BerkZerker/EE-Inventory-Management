@@ -1,6 +1,7 @@
 import { useState, useRef, type DragEvent, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import apiClient from "@/api/client";
+import { AxiosError } from "axios";
+import { invoiceApi } from "@/api/services";
 
 export default function UploadPage() {
   const [dragOver, setDragOver] = useState(false);
@@ -30,22 +31,25 @@ export default function UploadPage() {
     setError(null);
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append("file", selectedFile);
-      if (overwrite) form.append("overwrite", "true");
-      const resp = await apiClient.post("/invoices/upload", form);
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      if (overwrite) formData.append("overwrite", "true");
+      const resp = await invoiceApi.upload(formData);
       navigate(`/invoices/${resp.data.id}`);
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { error?: string; details?: { can_overwrite?: boolean } }; status?: number } })?.response;
-      if (resp?.status === 409 && resp?.data?.details?.can_overwrite) {
-        if (confirm(`${resp.data.error}\n\nOverwrite the existing pending invoice?`)) {
-          setUploading(false);
-          submit(true);
-          return;
+      if (err instanceof AxiosError && err.response) {
+        const resp = err.response;
+        if (resp.status === 409 && resp.data?.details?.can_overwrite) {
+          if (confirm(`${resp.data.error}\n\nOverwrite the existing pending invoice?`)) {
+            setUploading(false);
+            submit(true);
+            return;
+          }
         }
+        setError(resp.data?.error ?? "Upload failed");
+      } else {
+        setError("Upload failed");
       }
-      const msg = resp?.data?.error ?? "Upload failed";
-      setError(msg);
     } finally {
       setUploading(false);
     }
@@ -124,7 +128,7 @@ export default function UploadPage() {
           <button
             className="primary"
             disabled={uploading}
-            onClick={submit}
+            onClick={() => submit()}
             style={{ minWidth: "200px", padding: "0.75em 1.5em" }}
           >
             {uploading ? (

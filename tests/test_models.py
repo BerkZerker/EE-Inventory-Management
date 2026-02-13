@@ -492,6 +492,27 @@ class TestListBikes:
         page3 = list_bikes(db, limit=2, offset=4)
         assert len(page3) == 1
 
+    def test_default_limit(self, db: sqlite3.Connection, sample_product: dict[str, Any]) -> None:
+        """list_bikes applies a default limit of 500 when no limit is provided."""
+        # Create 3 bikes and verify default limit is applied (returns all since < 500)
+        for i in range(3):
+            create_bike(
+                db,
+                serial_number=f"DL-{i:03d}",
+                product_id=sample_product["id"],
+                actual_cost=500.0,
+            )
+        bikes = list_bikes(db)
+        assert len(bikes) == 3
+
+        # Verify we can override with explicit limit=None for unlimited
+        bikes_unlimited = list_bikes(db, limit=None)
+        assert len(bikes_unlimited) == 3
+
+        # Verify explicit limit still works
+        bikes_limited = list_bikes(db, limit=1)
+        assert len(bikes_limited) == 1
+
 
 class TestUpdateBikeStatus:
     def test_mark_sold(self, db: sqlite3.Connection, sample_bike: dict[str, Any]) -> None:

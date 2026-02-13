@@ -8,6 +8,7 @@ using reportlab.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from io import BytesIO
 from pathlib import Path
 
@@ -68,6 +69,7 @@ def create_label_sheet(
     serials: list[str],
     output_path: str,
     product_info: dict | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> str:
     """Create an Avery 5160 label sheet PDF with barcodes for each serial.
 
@@ -82,7 +84,9 @@ def create_label_sheet(
     # Build a per-serial product info cache
     products_cache: dict[str, dict] = {}
     if product_info is None:
-        conn = get_db(settings.database_path)
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_db(settings.database_path)
         try:
             for serial in serials:
                 bike = models.get_bike_by_serial(conn, serial)
@@ -91,7 +95,8 @@ def create_label_sheet(
                     if product:
                         products_cache[serial] = product
         finally:
-            conn.close()
+            if owns_conn:
+                conn.close()
     else:
         for serial in serials:
             products_cache[serial] = product_info
@@ -135,7 +140,7 @@ def create_label_sheet(
         # Product info below barcode (if available)
         info = products_cache.get(serial)
         if info:
-            label_text = info.get("model_name", "")
+            label_text = f"{info.get('brand', '')} {info.get('model', '')}".strip()
             if info.get("color"):
                 label_text += f" - {info['color']}"
             c.setFont("Helvetica", 5)
@@ -183,7 +188,7 @@ def create_single_label(
 
     # Product info at bottom
     if product_info:
-        label_text = product_info.get("model_name", "")
+        label_text = f"{product_info.get('brand', '')} {product_info.get('model', '')}".strip()
         if product_info.get("color"):
             label_text += f" - {product_info['color']}"
         c.setFont("Helvetica", 6)

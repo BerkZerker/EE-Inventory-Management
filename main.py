@@ -52,11 +52,10 @@ def receive_invoice(pdf_path: str) -> None:
     import database.models as models
     from services.invoice_parser import (
         ParseError,
-        allocate_costs,
         match_to_catalog,
         parse_invoice_with_retry,
     )
-    from services.serial_generator import generate_serial_numbers
+    from services.invoice_service import approve_invoice
 
     path = Path(pdf_path)
     if not path.exists():
@@ -95,6 +94,9 @@ def receive_invoice(pdf_path: str) -> None:
             total_amount=parsed.total,
             shipping_cost=parsed.shipping_cost,
             discount=parsed.discount,
+            credit_card_fees=parsed.credit_card_fees,
+            tax=parsed.tax,
+            other_fees=parsed.other_fees,
             file_path=str(path),
             parsed_data=parsed.model_dump_json(),
         )
@@ -114,31 +116,13 @@ def receive_invoice(pdf_path: str) -> None:
 
         models.create_invoice_items_bulk(conn, invoice["id"], item_dicts)
 
-        # Allocate costs
-        per_unit_costs = allocate_costs(parsed.items, parsed.shipping_cost, parsed.discount)
+        # Approve: allocate costs, generate serials, create bikes, push to Shopify
+        result = approve_invoice(conn, invoice["id"], push_to_shopify=False, approved_by="cli")
 
-        # Generate serials and create bikes
-        total_count = sum(item.quantity for item in parsed.items)
-        serials = generate_serial_numbers(total_count)
-
-        bike_dicts = []
-        serial_idx = 0
-        for item_dict, alloc_cost in zip(item_dicts, per_unit_costs):
-            for _ in range(item_dict["quantity"]):
-                bike_dicts.append({
-                    "serial_number": serials[serial_idx],
-                    "product_id": item_dict["product_id"],
-                    "actual_cost": alloc_cost,
-                    "invoice_id": invoice["id"],
-                })
-                serial_idx += 1
-
-        models.create_bikes_bulk(conn, bike_dicts)
-        models.update_invoice_status(conn, invoice["id"], "approved", approved_by="cli")
-
-        print(f"\nInvoice approved. Created {total_count} bikes:")
-        for serial in serials:
-            print(f"  {serial}")
+        bikes = result["bikes"]
+        print(f"\nInvoice approved. Created {len(bikes)} bikes:")
+        for bike in bikes:
+            print(f"  {bike['serial_number']}")
     finally:
         conn.close()
 
@@ -171,7 +155,7 @@ def generate_serials(count: int, sku: str) -> None:
         ]
         models.create_bikes_bulk(conn, bike_dicts)
 
-        print(f"Generated {count} serial(s) for {product['model_name']} ({sku}):")
+        print(f"Generated {count} serial(s) for {product.get('brand', '')} {product.get('model', '')} ({sku}):")
         for serial in serials:
             print(f"  {serial}")
     finally:
@@ -226,7 +210,7 @@ def inventory(available: bool, sold: bool, damaged: bool) -> None:
             sale = f"${bike['sale_price']:.2f}" if bike.get("sale_price") else "-"
             print(
                 f"{bike['serial_number']:<16} "
-                f"{bike.get('model_name', 'N/A'):<30} "
+                f"{f'{bike.get(\"brand\", \"\")} {bike.get(\"model\", \"N/A\")}'.strip():<30} "
                 f"{bike['status']:<10} "
                 f"${bike['actual_cost']:>9.2f} "
                 f"{sale:>10}"
@@ -262,7 +246,7 @@ def report(start: str, end: str) -> None:
             print("-" * 80)
             for row in by_product:
                 print(
-                    f"{row['model_name']:<30} "
+                    f"{f'{row.get(\"brand\", \"\")} {row.get(\"model\", \"\")}'.strip():<30} "
                     f"{row['units_sold']:>6} "
                     f"${row['total_revenue']:>11,.2f} "
                     f"${row['total_cost']:>11,.2f} "
@@ -279,63 +263,24 @@ def report(start: str, end: str) -> None:
 def reconcile() -> None:
     """Reconcile local inventory with Shopify."""
     from database.connection import get_db
-    import database.models as models
-    from services.shopify_sync import _graphql_request
+    from services.reconciliation import reconcile_inventory
 
     conn = get_db(settings.database_path)
     try:
-        products = models.list_products(conn)
-        if not products:
-            print("No products in database.")
+        results = reconcile_inventory(conn)
+
+        if not results:
+            print("Reconciliation complete: no mismatches found.")
             return
 
-        mismatches = 0
-        for product in products:
-            shopify_pid = product.get("shopify_product_id")
-            if not shopify_pid:
-                continue
+        for r in results:
+            print(f"\n{r['brand']} {r['model']} ({r['sku']}):")
+            if r["in_shopify_not_local"]:
+                print(f"  In Shopify but not local: {', '.join(r['in_shopify_not_local'])}")
+            if r["in_local_not_shopify"]:
+                print(f"  In local but not Shopify: {', '.join(r['in_local_not_shopify'])}")
 
-            # Query Shopify for variants of this product
-            query = """
-            query GetProductVariants($id: ID!) {
-              product(id: $id) {
-                variants(first: 100) {
-                  edges { node { id sku } }
-                }
-              }
-            }
-            """
-            try:
-                data = _graphql_request(query, {"id": shopify_pid})
-            except Exception as exc:
-                print(f"  Error querying Shopify for {product['sku']}: {exc}")
-                continue
-
-            shopify_skus = set()
-            for edge in data["product"]["variants"]["edges"]:
-                sku = edge["node"].get("sku", "")
-                if sku.startswith(settings.serial_prefix + "-"):
-                    shopify_skus.add(sku)
-
-            # Get local available bikes for this product
-            local_bikes = models.list_bikes(conn, product_id=product["id"], status="available")
-            local_serials = {b["serial_number"] for b in local_bikes}
-
-            in_shopify_not_local = shopify_skus - local_serials
-            in_local_not_shopify = local_serials - shopify_skus
-
-            if in_shopify_not_local or in_local_not_shopify:
-                mismatches += 1
-                print(f"\n{product['model_name']} ({product['sku']}):")
-                if in_shopify_not_local:
-                    print(f"  In Shopify but not local: {', '.join(sorted(in_shopify_not_local))}")
-                if in_local_not_shopify:
-                    print(f"  In local but not Shopify: {', '.join(sorted(in_local_not_shopify))}")
-
-        if mismatches == 0:
-            print("Reconciliation complete: no mismatches found.")
-        else:
-            print(f"\nReconciliation complete: {mismatches} product(s) with mismatches.")
+        print(f"\nReconciliation complete: {len(results)} product(s) with mismatches.")
     finally:
         conn.close()
 

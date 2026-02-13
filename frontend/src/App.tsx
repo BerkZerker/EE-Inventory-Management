@@ -1,56 +1,13 @@
 import { Routes, Route, NavLink } from "react-router-dom";
 import "./App.css";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import DashboardPage from "@/pages/DashboardPage";
 import UploadPage from "@/pages/UploadPage";
 import InvoiceListPage from "@/pages/InvoiceListPage";
 import ReviewPage from "@/pages/ReviewPage";
 import InventoryPage from "@/pages/InventoryPage";
 import ProductsPage from "@/pages/ProductsPage";
 import ReportPage from "@/pages/ReportPage";
-
-function Dashboard() {
-  return (
-    <div>
-      <div className="page-header">
-        <h2>Dashboard</h2>
-        <p>Welcome to the E-Bike Inventory Management System.</p>
-      </div>
-      <div className="stats-grid">
-        <NavLink to="/inventory" style={{ textDecoration: "none" }}>
-          <div className="stat-card">
-            <div className="label">Inventory</div>
-            <div className="value" style={{ fontSize: "1rem" }}>
-              View bikes &rarr;
-            </div>
-          </div>
-        </NavLink>
-        <NavLink to="/upload" style={{ textDecoration: "none" }}>
-          <div className="stat-card">
-            <div className="label">Invoices</div>
-            <div className="value" style={{ fontSize: "1rem" }}>
-              Upload PDF &rarr;
-            </div>
-          </div>
-        </NavLink>
-        <NavLink to="/products" style={{ textDecoration: "none" }}>
-          <div className="stat-card">
-            <div className="label">Products</div>
-            <div className="value" style={{ fontSize: "1rem" }}>
-              Manage catalog &rarr;
-            </div>
-          </div>
-        </NavLink>
-        <NavLink to="/reports" style={{ textDecoration: "none" }}>
-          <div className="stat-card">
-            <div className="label">Reports</div>
-            <div className="value" style={{ fontSize: "1rem" }}>
-              View profits &rarr;
-            </div>
-          </div>
-        </NavLink>
-      </div>
-    </div>
-  );
-}
 
 function App() {
   return (
@@ -73,15 +30,17 @@ function App() {
           </nav>
         </aside>
         <main className="main-content">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/upload" element={<UploadPage />} />
-            <Route path="/invoices" element={<InvoiceListPage />} />
-            <Route path="/invoices/:id" element={<ReviewPage />} />
-            <Route path="/inventory" element={<InventoryPage />} />
-            <Route path="/products" element={<ProductsPage />} />
-            <Route path="/reports" element={<ReportPage />} />
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/invoices" element={<InvoiceListPage />} />
+              <Route path="/invoices/:id" element={<ReviewPage />} />
+              <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/products" element={<ProductsPage />} />
+              <Route path="/reports" element={<ReportPage />} />
+            </Routes>
+          </ErrorBoundary>
         </main>
       </div>
     </div>

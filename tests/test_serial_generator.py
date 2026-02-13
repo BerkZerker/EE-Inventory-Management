@@ -12,26 +12,7 @@ from services.serial_generator import (
     peek_next_serial,
     peek_next_serials,
 )
-
-
-class _NoCloseConnection:
-    """Wrapper around a sqlite3.Connection that ignores .close() calls.
-
-    This prevents the serial_generator's finally-block from closing
-    the shared in-memory test fixture.
-    """
-
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        object.__setattr__(self, "_conn", conn)
-
-    def close(self) -> None:  # noqa: D102
-        pass  # intentionally do nothing
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._conn, name)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        setattr(self._conn, name, value)
+from tests.conftest import _NoCloseConnection
 
 
 @pytest.fixture

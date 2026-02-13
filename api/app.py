@@ -18,10 +18,10 @@ def create_app() -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
     app.config["SECRET_KEY"] = settings.flask_secret_key
-    app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
+    app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_size_mb * 1024 * 1024
 
-    # CORS for Vite dev server
-    CORS(app, origins=["http://localhost:5173"])
+    # CORS
+    CORS(app, origins=settings.cors_origins)
 
     # Ensure database schema is up to date (adds new columns if needed)
     init_database(settings.database_path)
@@ -38,7 +38,7 @@ def create_app() -> Flask:
 
     @app.errorhandler(413)
     def too_large(e):
-        return jsonify({"error": "File too large", "details": "Maximum upload size is 20MB"}), 413
+        return jsonify({"error": "File too large", "details": f"Maximum upload size is {settings.max_upload_size_mb}MB"}), 413
 
     @app.errorhandler(404)
     def not_found(e):

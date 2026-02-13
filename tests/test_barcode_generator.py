@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -13,39 +12,15 @@ from services.barcode_generator import (
     create_single_label,
     generate_barcode_image,
 )
-
-
-# ---------------------------------------------------------------------------
-# Helper: _NoCloseConnection (prevents test fixture DB from being closed)
-# ---------------------------------------------------------------------------
-
-
-class _NoCloseConnection:
-    """Wrapper around a sqlite3.Connection that ignores .close() calls.
-
-    This prevents the barcode_generator's finally-block from closing
-    the shared in-memory test fixture.
-    """
-
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        object.__setattr__(self, "_conn", conn)
-
-    def close(self) -> None:  # noqa: D102
-        pass  # intentionally do nothing
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._conn, name)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        setattr(self._conn, name, value)
-
+from tests.conftest import _NoCloseConnection
 
 # ---------------------------------------------------------------------------
 # Shared product_info fixture
 # ---------------------------------------------------------------------------
 
 SAMPLE_PRODUCT_INFO: dict = {
-    "model_name": "Trek Verve 3",
+    "brand": "Trek",
+    "model": "Verve 3",
     "color": "Blue",
     "sku": "TREK-VERVE-3-BLU-M",
 }
@@ -170,7 +145,7 @@ class TestCreateSingleLabel:
         assert result[:5] == b"%PDF-"
 
     def test_product_info_without_color(self) -> None:
-        info = {"model_name": "Trek Verve 3"}
+        info = {"brand": "Trek", "model": "Verve 3"}
         result = create_single_label("BIKE-00001", product_info=info)
         assert isinstance(result, bytes)
         assert result[:5] == b"%PDF-"

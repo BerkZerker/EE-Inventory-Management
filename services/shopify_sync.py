@@ -12,23 +12,39 @@ module automatically obtains and refreshes 24-hour access tokens.
 from __future__ import annotations
 
 import logging
+import sqlite3
+import threading
 import time
 
 import requests
 
+import database.models as models
+from api.exceptions import ShopifySyncError
 from config import settings
 from database.connection import get_db
-import database.models as models
+from services.shopify_queries import (
+    CREATE_PRODUCT_MUTATION,
+    CREATE_VARIANTS_MUTATION,
+    DELETE_VARIANTS_MUTATION,
+    GET_PRODUCT_VARIANTS_QUERY,
+    LOCATIONS_QUERY,
+    SEARCH_PRODUCTS_QUERY,
+)
 
 logger = logging.getLogger(__name__)
 
 _cached_location_id: str | None = None
+
+# Rate-limit back-off thresholds
+RATE_LIMIT_AVAILABLE_THRESHOLD = 100
+RATE_LIMIT_RECOVERY_FACTOR = 50
 
 # ---------------------------------------------------------------------------
 # Token management (client-credentials grant)
 # ---------------------------------------------------------------------------
 
 _token_cache: dict[str, object] = {"access_token": None, "expires_at": 0.0}
+_token_lock = threading.Lock()
 
 
 def _obtain_access_token() -> str:
@@ -47,34 +63,35 @@ def _obtain_access_token() -> str:
                 "Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, "
                 "or the legacy SHOPIFY_ACCESS_TOKEN."
             )
-            raise RuntimeError(msg)
+            raise ShopifySyncError(msg)
         return settings.shopify_access_token
 
-    # Return cached token if still valid (with 60 s margin)
-    if _token_cache["access_token"] and time.time() < (_token_cache["expires_at"] - 60):  # type: ignore[operator]
-        return _token_cache["access_token"]  # type: ignore[return-value]
+    with _token_lock:
+        # Return cached token if still valid (with 60 s margin)
+        if _token_cache["access_token"] and time.time() < (_token_cache["expires_at"] - 60):  # type: ignore[operator]
+            return _token_cache["access_token"]  # type: ignore[return-value]
 
-    url = f"https://{settings.shopify_store_url}/admin/oauth/access_token"
-    resp = requests.post(
-        url,
-        data={
-            "grant_type": "client_credentials",
-            "client_id": settings.shopify_client_id,
-            "client_secret": settings.shopify_client_secret,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+        url = f"https://{settings.shopify_store_url}/admin/oauth/access_token"
+        resp = requests.post(
+            url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": settings.shopify_client_id,
+                "client_secret": settings.shopify_client_secret,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
-    token = data["access_token"]
-    expires_in = data.get("expires_in", 86399)
-    _token_cache["access_token"] = token
-    _token_cache["expires_at"] = time.time() + expires_in
+        token = data["access_token"]
+        expires_in = data.get("expires_in", 86399)
+        _token_cache["access_token"] = token
+        _token_cache["expires_at"] = time.time() + expires_in
 
-    logger.info("Obtained Shopify access token (expires in %ds)", expires_in)
-    return token
+        logger.info("Obtained Shopify access token (expires in %ds)", expires_in)
+        return token
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +127,13 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
     # GraphQL-level errors
     if "errors" in result:
         msg = f"GraphQL errors: {result['errors']}"
-        raise RuntimeError(msg)
+        raise ShopifySyncError(msg)
 
     # Rate-limit back-off
     try:
         available = result["extensions"]["cost"]["throttleStatus"]["currentlyAvailable"]
-        if available < 100:
-            wait = max(1.0, 100 - available) / 50
+        if available < RATE_LIMIT_AVAILABLE_THRESHOLD:
+            wait = max(1.0, RATE_LIMIT_AVAILABLE_THRESHOLD - available) / RATE_LIMIT_RECOVERY_FACTOR
             logger.warning("Shopify rate limit low (%s available), sleeping %.1fs", available, wait)
             time.sleep(wait)
     except (KeyError, TypeError):
@@ -128,35 +145,6 @@ def _graphql_request(query: str, variables: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 # Ensure Shopify product exists (push-based sync)
 # ---------------------------------------------------------------------------
-
-_SEARCH_PRODUCTS_QUERY = """
-query SearchProducts($query: String!) {
-  products(first: 5, query: $query) {
-    edges {
-      node {
-        id
-        title
-      }
-    }
-  }
-}
-"""
-
-_CREATE_PRODUCT_MUTATION = """
-mutation CreateProduct($input: ProductInput!) {
-  productCreate(input: $input) {
-    userErrors {
-      field
-      message
-    }
-    product {
-      id
-      title
-    }
-  }
-}
-"""
-
 
 def ensure_shopify_product(conn, product: dict) -> str | None:
     """Ensure a Shopify product exists for this brand+model.
@@ -191,7 +179,7 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
     # 2. Search Shopify by title
     try:
         data = _graphql_request(
-            _SEARCH_PRODUCTS_QUERY,
+            SEARCH_PRODUCTS_QUERY,
             {"query": f"title:'{title}'"},
         )
         for edge in data["products"]["edges"]:
@@ -202,13 +190,15 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
                         conn, s["id"], shopify_product_id=shopify_pid,
                     )
                 return shopify_pid
-    except Exception:
-        logger.warning("Shopify product search failed for '%s'", title)
+    except Exception as exc:
+        raise ShopifySyncError(
+            f"Shopify product search failed for '{title}'"
+        ) from exc
 
     # 3. Create new Shopify product with 3 options
     try:
         data = _graphql_request(
-            _CREATE_PRODUCT_MUTATION,
+            CREATE_PRODUCT_MUTATION,
             {
                 "input": {
                     "title": title,
@@ -223,26 +213,25 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
         )
         result = data["productCreate"]
         if result["userErrors"]:
-            logger.warning("Shopify product creation errors: %s", result["userErrors"])
-            return None
+            raise ShopifySyncError(
+                f"Shopify product creation errors for '{title}': {result['userErrors']}"
+            )
 
         shopify_pid = result["product"]["id"]
         for s in siblings:
             models.update_product(conn, s["id"], shopify_product_id=shopify_pid)
         return shopify_pid
-    except Exception:
-        logger.exception("Failed to create Shopify product '%s'", title)
-        return None
+    except ShopifySyncError:
+        raise
+    except Exception as exc:
+        raise ShopifySyncError(
+            f"Failed to create Shopify product '{title}'"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
 # Location ID
 # ---------------------------------------------------------------------------
-
-_LOCATIONS_QUERY = """
-query { locations(first: 1) { edges { node { id } } } }
-"""
-
 
 def _get_location_id() -> str:
     """Return the first Shopify location ID, caching the result."""
@@ -250,11 +239,11 @@ def _get_location_id() -> str:
     if _cached_location_id is not None:
         return _cached_location_id
 
-    data = _graphql_request(_LOCATIONS_QUERY)
+    data = _graphql_request(LOCATIONS_QUERY)
     edges = data["locations"]["edges"]
     if not edges:
         msg = "No locations found in Shopify store"
-        raise RuntimeError(msg)
+        raise ShopifySyncError(msg)
     _cached_location_id = edges[0]["node"]["id"]
     return _cached_location_id
 
@@ -263,47 +252,14 @@ def _get_location_id() -> str:
 # Variant creation
 # ---------------------------------------------------------------------------
 
-_CREATE_VARIANTS_MUTATION = """
-mutation CreateVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-  productVariantsBulkCreate(productId: $productId, variants: $variants) {
-    userErrors {
-      field
-      message
-    }
-    productVariants {
-      id
-      title
-      sku
-    }
-  }
-}
-"""
+def _delete_default_variant(shopify_product_id: str) -> bool:
+    """Delete the placeholder Default/Default/Default variant if present.
 
-
-_GET_PRODUCT_VARIANTS_QUERY = """
-query GetProductVariants($id: ID!) {
-  product(id: $id) {
-    variants(first: 100) {
-      edges {
-        node {
-          id
-          selectedOptions {
-            name
-            value
-          }
-        }
-      }
-    }
-  }
-}
-"""
-
-
-def _delete_default_variant(shopify_product_id: str) -> None:
-    """Delete the placeholder Default/Default/Default variant if present."""
+    Returns True if defaults were successfully deleted, False otherwise.
+    """
     try:
         data = _graphql_request(
-            _GET_PRODUCT_VARIANTS_QUERY,
+            GET_PRODUCT_VARIANTS_QUERY,
             {"id": shopify_product_id},
         )
         default_ids = []
@@ -314,7 +270,7 @@ def _delete_default_variant(shopify_product_id: str) -> None:
 
         if default_ids:
             _graphql_request(
-                _DELETE_VARIANTS_MUTATION,
+                DELETE_VARIANTS_MUTATION,
                 {
                     "productId": shopify_product_id,
                     "variantsIds": default_ids,
@@ -325,13 +281,22 @@ def _delete_default_variant(shopify_product_id: str) -> None:
                 len(default_ids),
                 shopify_product_id,
             )
+            return True
+        return False
     except Exception:
         logger.warning(
-            "Failed to clean up default variant for %s", shopify_product_id
+            "Failed to clean up default variant for %s",
+            shopify_product_id,
+            exc_info=True,
         )
+        return False
 
 
-def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
+def create_variants_for_bikes(
+    bikes: list[dict],
+    product: dict,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict]:
     """Create Shopify variants for a list of bikes under a product.
 
     Each bike becomes a variant with 3 option values: Color, Size, Serial.
@@ -369,7 +334,7 @@ def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
         })
 
     data = _graphql_request(
-        _CREATE_VARIANTS_MUTATION,
+        CREATE_VARIANTS_MUTATION,
         {"productId": shopify_product_id, "variants": variants_input},
     )
 
@@ -381,7 +346,9 @@ def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
     created_variants = result["productVariants"] or []
 
     # Update local bike records with Shopify variant IDs
-    conn = get_db(settings.database_path)
+    owns_conn = conn is None
+    if owns_conn:
+        conn = get_db(settings.database_path)
     try:
         variant_by_sku = {v["sku"]: v for v in created_variants}
         for bike in bikes:
@@ -389,7 +356,8 @@ def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
             if variant:
                 models.update_bike(conn, bike["id"], shopify_variant_id=variant["id"])
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
 
     # Clean up the placeholder Default/Default/Default variant
     if created_variants:
@@ -401,18 +369,6 @@ def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Archive sold variants
 # ---------------------------------------------------------------------------
-
-_DELETE_VARIANTS_MUTATION = """
-mutation DeleteVariants($productId: ID!, $variantsIds: [ID!]!) {
-  productVariantsBulkDelete(productId: $productId, variantsIds: $variantsIds) {
-    userErrors {
-      field
-      message
-    }
-  }
-}
-"""
-
 
 def archive_sold_variants(product_id: int) -> int:
     """Delete Shopify variants for sold bikes and clear local references.
@@ -437,7 +393,7 @@ def archive_sold_variants(product_id: int) -> int:
         variant_ids = [b["shopify_variant_id"] for b in to_delete]
 
         data = _graphql_request(
-            _DELETE_VARIANTS_MUTATION,
+            DELETE_VARIANTS_MUTATION,
             {
                 "productId": product["shopify_product_id"],
                 "variantsIds": variant_ids,

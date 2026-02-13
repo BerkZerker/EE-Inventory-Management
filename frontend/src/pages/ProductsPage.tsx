@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import apiClient from "@/api/client";
+import { productApi } from "@/api/services";
+import { extractErrorMessage } from "@/api/errors";
+import { useForm } from "@/hooks/useForm";
 import type { Product } from "@/types";
 
-function emptyProduct() {
-  return { brand: "", model: "", retail_price: 0, color: "", size: "" };
-}
+const EMPTY_PRODUCT = { brand: "", model: "", retail_price: 0, color: "", size: "" };
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -12,12 +12,12 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [form, setForm] = useState(emptyProduct());
+  const { values: form, setValues: setForm, reset: resetForm } = useForm(EMPTY_PRODUCT);
 
   const load = async () => {
     setLoading(true);
     try {
-      const resp = await apiClient.get("/products");
+      const resp = await productApi.list();
       setProducts(resp.data);
     } catch {
       setError("Failed to load products.");
@@ -34,19 +34,16 @@ export default function ProductsPage() {
     setError(null);
     try {
       if (editId) {
-        await apiClient.put(`/products/${editId}`, form);
+        await productApi.update(editId, form);
       } else {
-        await apiClient.post("/products", form);
+        await productApi.create(form);
       }
       setShowForm(false);
       setEditId(null);
-      setForm(emptyProduct());
+      resetForm();
       load();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data
-          ?.error ?? "Save failed";
-      setError(msg);
+      setError(extractErrorMessage(err, "Save failed"));
     }
   };
 
@@ -65,7 +62,7 @@ export default function ProductsPage() {
   const deleteProduct = async (id: number) => {
     if (!confirm("Delete this product?")) return;
     try {
-      await apiClient.delete(`/products/${id}`);
+      await productApi.delete(id);
       load();
     } catch {
       setError("Delete failed.");
@@ -86,7 +83,7 @@ export default function ProductsPage() {
           className="primary"
           onClick={() => {
             setEditId(null);
-            setForm(emptyProduct());
+            resetForm();
             setShowForm(!showForm);
           }}
         >

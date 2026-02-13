@@ -6,28 +6,11 @@ import base64
 import hashlib
 import hmac
 import json
-import sqlite3
 
 import pytest
 
+from tests.conftest import _NoCloseConnection
 from webhook_server import create_webhook_app, verify_shopify_webhook
-
-
-class _NoCloseConnection:
-    """Wrapper that ignores .close() on shared test connection."""
-
-    def __init__(self, conn):
-        object.__setattr__(self, "_conn", conn)
-
-    def close(self):
-        pass
-
-    def __getattr__(self, name):
-        return getattr(self._conn, name)
-
-    def __setattr__(self, name, value):
-        setattr(self._conn, name, value)
-
 
 TEST_SECRET = "test-webhook-secret"
 
@@ -189,6 +172,46 @@ class TestWebhookHandler:
         )
         assert resp.status_code == 200
 
+    def test_custom_serial_prefix(self, db, sample_product, monkeypatch):
+        """Bikes with a custom serial_prefix are still processed."""
+        from database.models import create_bike, get_bike_by_serial
+
+        wrapper = _NoCloseConnection(db)
+        monkeypatch.setattr("webhook_server.get_db", lambda _path: wrapper)
+        monkeypatch.setattr("webhook_server.settings.shopify_webhook_secret", TEST_SECRET)
+        monkeypatch.setattr("webhook_server.settings.serial_prefix", "EBIKE")
+
+        app = create_webhook_app()
+        app.config["TESTING"] = True
+
+        bike = create_bike(
+            db,
+            serial_number="EBIKE-00001",
+            product_id=sample_product["id"],
+            actual_cost=900.0,
+        )
+
+        payload = json.dumps({
+            "id": 77777,
+            "line_items": [{"sku": "EBIKE-00001", "price": "1499.99"}],
+        }).encode()
+
+        with app.test_client() as client:
+            resp = client.post(
+                "/webhooks/orders/create",
+                data=payload,
+                headers={
+                    "X-Shopify-Hmac-SHA256": _sign_payload(payload),
+                    "X-Shopify-Webhook-Id": "webhook-custom-prefix",
+                    "Content-Type": "application/json",
+                },
+            )
+            assert resp.status_code == 200
+
+        updated = get_bike_by_serial(db, "EBIKE-00001")
+        assert updated["status"] == "sold"
+        assert updated["sale_price"] == 1499.99
+
     def test_non_bike_sku_ignored(self, webhook_client, db):
         payload = json.dumps({
             "id": 30001,
@@ -239,6 +262,53 @@ class TestWebhookHandler:
             },
         )
         assert resp.status_code == 200
+
+    def test_transaction_rollback_on_error(self, webhook_client, db, sample_product, monkeypatch):
+        """If processing fails mid-order, all bike updates should be rolled back."""
+        from database.models import create_bike, get_bike_by_serial
+
+        # Create two bikes
+        create_bike(db, serial_number="BIKE-TX001", product_id=sample_product["id"], actual_cost=800.0)
+        create_bike(db, serial_number="BIKE-TX002", product_id=sample_product["id"], actual_cost=900.0)
+
+        # Patch mark_bike_sold to fail on the second call
+        call_count = {"n": 0}
+        original_mark = __import__("database.models", fromlist=["mark_bike_sold"]).mark_bike_sold
+
+        def _failing_mark(conn, serial, sale_price=None, shopify_order_id=None, commit=True):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("simulated failure on second bike")
+            return original_mark(conn, serial, sale_price=sale_price, shopify_order_id=shopify_order_id, commit=commit)
+
+        monkeypatch.setattr("webhook_server.models.mark_bike_sold", _failing_mark)
+
+        payload = json.dumps({
+            "id": 60001,
+            "line_items": [
+                {"sku": "BIKE-TX001", "price": "1000.00"},
+                {"sku": "BIKE-TX002", "price": "1100.00"},
+            ],
+        }).encode()
+
+        resp = webhook_client.post(
+            "/webhooks/orders/create",
+            data=payload,
+            headers={
+                "X-Shopify-Hmac-SHA256": _sign_payload(payload),
+                "X-Shopify-Webhook-Id": "webhook-rollback-test",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 200
+
+        # First bike should NOT be marked as sold (rollback happened)
+        bike1 = get_bike_by_serial(db, "BIKE-TX001")
+        assert bike1["status"] == "available"
+
+        # Second bike should also still be available
+        bike2 = get_bike_by_serial(db, "BIKE-TX002")
+        assert bike2["status"] == "available"
 
     def test_processing_error_logged(self, webhook_client, db, monkeypatch):
         payload = json.dumps({

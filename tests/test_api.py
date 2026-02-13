@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 import io
-import json
 from unittest.mock import patch
 
-import pytest
-
 from database.models import (
-    create_bike,
     create_invoice,
     create_invoice_items_bulk,
     create_product,
     update_invoice_status,
 )
 from services.invoice_parser import ParsedInvoice, ParsedInvoiceItem
-
 
 # ===========================================================================
 # Health check
@@ -94,6 +89,53 @@ class TestCreateProduct:
         assert resp.status_code == 400
         data = resp.get_json()
         assert "Missing required field" in data["error"]
+
+    def test_negative_retail_price(self, client) -> None:
+        resp = client.post(
+            "/api/products",
+            json={"brand": "Test", "model": "Bike", "retail_price": -100},
+        )
+        assert resp.status_code == 400
+        assert "negative" in resp.get_json()["error"].lower()
+
+    def test_shopify_warning_on_sync_failure(self, client) -> None:
+        """When Shopify sync fails, the response includes shopify_warning."""
+        with patch(
+            "services.shopify_sync.ensure_shopify_product",
+            side_effect=RuntimeError("Shopify down"),
+        ):
+            resp = client.post(
+                "/api/products",
+                json={
+                    "brand": "Warn",
+                    "model": "Bike",
+                    "retail_price": 999.99,
+                    "color": "Red",
+                    "size": "Large",
+                },
+            )
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert "shopify_warning" in data
+        assert "Shopify sync failed" in data["shopify_warning"]
+
+    def test_integrity_error_returns_409(self, client, db) -> None:
+        """IntegrityError from the database returns 409."""
+        import sqlite3
+
+        with patch(
+            "api.routes.models.create_product",
+            side_effect=sqlite3.IntegrityError("UNIQUE constraint failed"),
+        ):
+            resp = client.post(
+                "/api/products",
+                json={
+                    "brand": "Dup",
+                    "model": "Bike",
+                    "retail_price": 500.00,
+                },
+            )
+        assert resp.status_code == 409
 
 
 class TestUpdateProduct:
@@ -335,6 +377,28 @@ class TestEditInvoiceItem:
         assert resp.status_code == 400
         assert "pending" in resp.get_json()["error"].lower()
 
+    def test_quantity_less_than_one(self, client, db, sample_invoice_with_items, sample_product) -> None:
+        invoice_id = sample_invoice_with_items["id"]
+        item_id = sample_invoice_with_items["items"][0]["id"]
+
+        resp = client.put(
+            f"/api/invoices/{invoice_id}/items/{item_id}",
+            json={"quantity": 0},
+        )
+        assert resp.status_code == 400
+        assert "quantity" in resp.get_json()["error"].lower()
+
+    def test_negative_unit_cost(self, client, db, sample_invoice_with_items, sample_product) -> None:
+        invoice_id = sample_invoice_with_items["id"]
+        item_id = sample_invoice_with_items["items"][0]["id"]
+
+        resp = client.put(
+            f"/api/invoices/{invoice_id}/items/{item_id}",
+            json={"unit_cost": -50.0},
+        )
+        assert resp.status_code == 400
+        assert "unit_cost" in resp.get_json()["error"].lower()
+
 
 class TestApproveInvoice:
     def test_success(self, client, db, sample_product) -> None:
@@ -483,7 +547,8 @@ class TestGetInvoicePdf:
         resp = client.get(f"/api/invoices/{sample_invoice['id']}/pdf")
         assert resp.status_code == 404
 
-    def test_success(self, client, db, tmp_path) -> None:
+    def test_success(self, client, db, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr("config.settings.invoice_upload_dir", str(tmp_path))
         # Create a fake PDF file
         pdf_file = tmp_path / "test.pdf"
         pdf_file.write_bytes(b"%PDF-1.4 fake content")

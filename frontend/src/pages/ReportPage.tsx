@@ -1,10 +1,11 @@
 import { useState } from "react";
-import apiClient from "@/api/client";
+import { reportApi } from "@/api/services";
+import { DEFAULT_REPORT_DAYS, MS_PER_DAY } from "@/constants";
 import type { ProfitSummary, ProfitByProduct } from "@/types";
 
 export default function ReportPage() {
   const today = new Date().toISOString().slice(0, 10);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000)
+  const thirtyDaysAgo = new Date(Date.now() - DEFAULT_REPORT_DAYS * MS_PER_DAY)
     .toISOString()
     .slice(0, 10);
 
@@ -19,9 +20,7 @@ export default function ReportPage() {
     setLoading(true);
     setError(null);
     try {
-      const resp = await apiClient.get("/reports/profit", {
-        params: { start, end },
-      });
+      const resp = await reportApi.profit(start, end);
       setSummary(resp.data.summary);
       setByProduct(resp.data.by_product);
     } catch {

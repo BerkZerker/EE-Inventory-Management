@@ -55,13 +55,8 @@ def _migrate_brand_model(conn: sqlite3.Connection) -> None:
             ).fetchone()
             color = product[0] or ""
             size = product[1] or ""
-            import re
-            sku = (
-                "-".join(p for p in [brand, model, color, size] if p)
-                .upper()
-                .replace(" ", "-")
-            )
-            sku = re.sub(r"[^A-Z0-9]+", "-", sku).strip("-")
+            from utils.sku import generate_sku
+            sku = generate_sku(brand, model, color, size)
             conn.execute(
                 "UPDATE products SET brand = ?, model = ?, sku = ? WHERE id = ?",
                 (brand, model, sku, row[0]),
