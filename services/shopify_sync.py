@@ -212,6 +212,7 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
             {
                 "input": {
                     "title": title,
+                    "status": "ACTIVE",
                     "productOptions": [
                         {"name": "Color", "values": [{"name": "Default"}]},
                         {"name": "Size", "values": [{"name": "Default"}]},
@@ -279,6 +280,57 @@ mutation CreateVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!
 """
 
 
+_GET_PRODUCT_VARIANTS_QUERY = """
+query GetProductVariants($id: ID!) {
+  product(id: $id) {
+    variants(first: 100) {
+      edges {
+        node {
+          id
+          selectedOptions {
+            name
+            value
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _delete_default_variant(shopify_product_id: str) -> None:
+    """Delete the placeholder Default/Default/Default variant if present."""
+    try:
+        data = _graphql_request(
+            _GET_PRODUCT_VARIANTS_QUERY,
+            {"id": shopify_product_id},
+        )
+        default_ids = []
+        for edge in data["product"]["variants"]["edges"]:
+            opts = edge["node"]["selectedOptions"]
+            if all(opt["value"] == "Default" for opt in opts):
+                default_ids.append(edge["node"]["id"])
+
+        if default_ids:
+            _graphql_request(
+                _DELETE_VARIANTS_MUTATION,
+                {
+                    "productId": shopify_product_id,
+                    "variantsIds": default_ids,
+                },
+            )
+            logger.info(
+                "Deleted %d default variant(s) from %s",
+                len(default_ids),
+                shopify_product_id,
+            )
+    except Exception:
+        logger.warning(
+            "Failed to clean up default variant for %s", shopify_product_id
+        )
+
+
 def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
     """Create Shopify variants for a list of bikes under a product.
 
@@ -311,8 +363,7 @@ def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
             "inventoryQuantities": [
                 {
                     "locationId": location_id,
-                    "name": "available",
-                    "quantity": 1,
+                    "availableQuantity": 1,
                 },
             ],
         })
@@ -339,6 +390,10 @@ def create_variants_for_bikes(bikes: list[dict], product: dict) -> list[dict]:
                 models.update_bike(conn, bike["id"], shopify_variant_id=variant["id"])
     finally:
         conn.close()
+
+    # Clean up the placeholder Default/Default/Default variant
+    if created_variants:
+        _delete_default_variant(shopify_product_id)
 
     return created_variants
 

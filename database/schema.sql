@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     unit_cost       REAL NOT NULL DEFAULT 0,
     total_cost      REAL NOT NULL DEFAULT 0,
     allocated_cost  REAL,                                 -- After shipping/discount allocation
+    parsed_brand    TEXT,                                 -- Brand extracted by AI parser
+    parsed_model    TEXT,                                 -- Model extracted by AI parser
+    parsed_color    TEXT,                                 -- Color extracted by AI parser
+    parsed_size     TEXT,                                 -- Size extracted by AI parser
     created_at      TEXT DEFAULT (datetime('now'))
 );
 

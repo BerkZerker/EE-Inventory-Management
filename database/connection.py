@@ -69,6 +69,17 @@ def _migrate_brand_model(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_invoice_item_parsed_fields(conn: sqlite3.Connection) -> None:
+    """Add parsed_brand, parsed_model, parsed_color, parsed_size columns if missing."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(invoice_items)").fetchall()
+    }
+    for col in ("parsed_brand", "parsed_model", "parsed_color", "parsed_size"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE invoice_items ADD COLUMN {col} TEXT")
+    conn.commit()
+
+
 def init_database(db_path: str) -> None:
     """Create all tables by executing schema.sql.
 
@@ -81,4 +92,5 @@ def init_database(db_path: str) -> None:
     conn.executescript(schema_sql)
     _migrate_invoice_fee_columns(conn)
     _migrate_brand_model(conn)
+    _migrate_invoice_item_parsed_fields(conn)
     conn.close()

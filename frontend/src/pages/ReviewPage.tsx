@@ -115,7 +115,13 @@ export default function ReviewPage() {
     if (value === "new") {
       setPrevProductId(item.product_id);
       setNewProductFor(item);
-      setNewProduct(emptyNewProduct());
+      setNewProduct({
+        brand: item.parsed_brand ?? "",
+        model: item.parsed_model ?? "",
+        color: item.parsed_color ?? "",
+        size: item.parsed_size ?? "",
+        retail_price: 0,
+      });
       setShowNewProduct(true);
     } else {
       const val = value ? Number(value) : null;

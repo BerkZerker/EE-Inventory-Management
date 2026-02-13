@@ -343,6 +343,47 @@ class TestCreateVariantsForBikes:
             },
             status=200,
         )
+        # _delete_default_variant: get variants query
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "product": {
+                        "variants": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "id": "gid://shopify/ProductVariant/999",
+                                        "selectedOptions": [
+                                            {"name": "Color", "value": "Default"},
+                                            {"name": "Size", "value": "Default"},
+                                            {"name": "Serial", "value": "Default"},
+                                        ],
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        # _delete_default_variant: delete mutation
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "productVariantsBulkDelete": {
+                        "userErrors": [],
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
 
         created = create_variants_for_bikes([bike1, bike2], product)
 
@@ -366,6 +407,13 @@ class TestCreateVariantsForBikes:
         assert len(option_values) == 3
         names = {ov["optionName"] for ov in option_values}
         assert names == {"Color", "Size", "Serial"}
+
+        # Verify inventoryQuantities uses InventoryLevelInput format
+        inv_qty = variant_input["inventoryQuantities"][0]
+        assert inv_qty["locationId"] == "gid://shopify/Location/1"
+        assert inv_qty["availableQuantity"] == 1
+        assert "name" not in inv_qty
+        assert "quantity" not in inv_qty
 
     @responses.activate
     @pytest.mark.usefixtures("_patch_db")
@@ -419,6 +467,47 @@ class TestCreateVariantsForBikes:
                                 "sku": "BIKE-001",
                             },
                         ],
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        # _delete_default_variant: get variants query
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "product": {
+                        "variants": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "id": "gid://shopify/ProductVariant/999",
+                                        "selectedOptions": [
+                                            {"name": "Color", "value": "Default"},
+                                            {"name": "Size", "value": "Default"},
+                                            {"name": "Serial", "value": "Default"},
+                                        ],
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        # _delete_default_variant: delete mutation
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "productVariantsBulkDelete": {
+                        "userErrors": [],
                     }
                 },
                 "extensions": _good_extensions(),

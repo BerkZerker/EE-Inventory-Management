@@ -147,6 +147,10 @@ def upload_invoice() -> tuple:
                 "unit_cost": item.unit_cost,
                 "total_cost": item.total_cost,
                 "product_id": product_id,
+                "parsed_brand": item.brand,
+                "parsed_model": item.model,
+                "parsed_color": item.color,
+                "parsed_size": item.size,
             }
         )
 

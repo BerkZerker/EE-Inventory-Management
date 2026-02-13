@@ -43,6 +43,10 @@ export interface InvoiceItem {
   unit_cost: number;
   total_cost: number;
   allocated_cost: number | null;
+  parsed_brand: string | null;
+  parsed_model: string | null;
+  parsed_color: string | null;
+  parsed_size: string | null;
   created_at: string;
 }
 

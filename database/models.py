@@ -322,6 +322,10 @@ _INVOICE_ITEM_UPDATE_ALLOWED = {
     "unit_cost",
     "total_cost",
     "allocated_cost",
+    "parsed_brand",
+    "parsed_model",
+    "parsed_color",
+    "parsed_size",
 }
 
 
@@ -334,6 +338,10 @@ def create_invoice_item(
     total_cost: float,
     product_id: int | None = None,
     allocated_cost: float | None = None,
+    parsed_brand: str | None = None,
+    parsed_model: str | None = None,
+    parsed_color: str | None = None,
+    parsed_size: str | None = None,
     commit: bool = True,
 ) -> dict[str, Any]:
     """Insert a single invoice line item and return it."""
@@ -341,10 +349,15 @@ def create_invoice_item(
         """
         INSERT INTO invoice_items
             (invoice_id, product_id, description, quantity, unit_cost,
-             total_cost, allocated_cost)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+             total_cost, allocated_cost, parsed_brand, parsed_model,
+             parsed_color, parsed_size)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (invoice_id, product_id, description, quantity, unit_cost, total_cost, allocated_cost),
+        (
+            invoice_id, product_id, description, quantity, unit_cost,
+            total_cost, allocated_cost, parsed_brand, parsed_model,
+            parsed_color, parsed_size,
+        ),
     )
     if commit:
         conn.commit()
@@ -367,6 +380,10 @@ def create_invoice_items_bulk(
             item["unit_cost"],
             item["total_cost"],
             item.get("allocated_cost"),
+            item.get("parsed_brand"),
+            item.get("parsed_model"),
+            item.get("parsed_color"),
+            item.get("parsed_size"),
         )
         for item in items
     ]
@@ -374,8 +391,9 @@ def create_invoice_items_bulk(
         """
         INSERT INTO invoice_items
             (invoice_id, product_id, description, quantity, unit_cost,
-             total_cost, allocated_cost)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+             total_cost, allocated_cost, parsed_brand, parsed_model,
+             parsed_color, parsed_size)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows_data,
     )
