@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { AxiosError } from "axios";
 import { invoiceApi } from "@/api/services";
 import { extractErrorMessage } from "@/api/errors";
+import { fmtDateTime } from "@/fmt";
 import type { Invoice } from "@/types";
 
 export default function InvoiceListPage() {
@@ -240,7 +241,7 @@ export default function InvoiceListPage() {
                 <td>
                   <span className={`badge ${inv.status}`}>{inv.status}</span>
                 </td>
-                <td>{new Date(inv.created_at).toLocaleDateString()}</td>
+                <td>{fmtDateTime(inv.created_at)}</td>
               </tr>
             ))}
           </tbody>

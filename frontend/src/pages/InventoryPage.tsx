@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { bikeApi, productApi, serialApi } from "@/api/services";
 import { extractErrorMessage } from "@/api/errors";
 import { useForm } from "@/hooks/useForm";
+import { fmtDateTime } from "@/fmt";
 import type { InventorySummary, Bike, Product } from "@/types";
 
 const EMPTY_PRODUCT = { brand: "", model: "", retail_price: 0, color: "", size: "" };
@@ -385,7 +386,7 @@ export default function InventoryPage() {
                     <td>{bike.brand ?? ""} {bike.model ?? ""}</td>
                     <td><span className={`badge ${bike.status}`}>{bike.status}</span></td>
                     <td>${bike.actual_cost.toFixed(2)}</td>
-                    <td>{bike.date_received}</td>
+                    <td>{fmtDateTime(bike.date_received)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -461,32 +462,22 @@ export default function InventoryPage() {
                         </tr>
                         {expandedProduct === v.product_id && (
                           <tr key={`${v.product_id}-bikes`}>
-                            <td colSpan={6} style={{ padding: 0, background: "#f9fafb" }}>
+                            <td colSpan={6} style={{ padding: "0.5rem 0 0.5rem 2rem", background: "#eef2ff" }}>
                               {bikesLoading ? (
-                                <div style={{ padding: "1rem", color: "#6b7280" }}>Loading bikes...</div>
+                                <div style={{ padding: "0.25rem", color: "#6b7280" }}>Loading bikes...</div>
                               ) : productBikes.length === 0 ? (
-                                <div style={{ padding: "1rem", color: "#6b7280" }}>No bikes for this product.</div>
+                                <div style={{ padding: "0.25rem", color: "#6b7280" }}>No bikes for this product.</div>
                               ) : (
-                                <table style={{ margin: 0, boxShadow: "none" }}>
-                                  <thead>
-                                    <tr>
-                                      <th>Bike #</th>
-                                      <th>Status</th>
-                                      <th>Cost</th>
-                                      <th>Received</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {productBikes.map((bike) => (
-                                      <tr key={bike.id}>
-                                        <td>{bike.serial_number}</td>
-                                        <td><span className={`badge ${bike.status}`}>{bike.status}</span></td>
-                                        <td>${bike.actual_cost.toFixed(2)}</td>
-                                        <td>{bike.date_received}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.25rem 0" }}>
+                                  {productBikes.map((bike) => (
+                                    <div key={bike.id} style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
+                                      <span style={{ fontWeight: 600 }}>{bike.serial_number}</span>
+                                      <span className={`badge ${bike.status}`}>{bike.status}</span>
+                                      <span><span style={{ color: "#6b7280" }}>Cost:</span> ${bike.actual_cost.toFixed(2)}</span>
+                                      <span><span style={{ color: "#6b7280" }}>Received:</span> {fmtDateTime(bike.date_received)}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </td>
                           </tr>

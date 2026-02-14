@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { bikeApi, invoiceApi, productApi } from "@/api/services";
+import { fmtDate } from "@/fmt";
 import type { InventorySummary, Invoice } from "@/types";
 
 export default function DashboardPage() {
@@ -105,7 +106,7 @@ export default function DashboardPage() {
                     <NavLink to={`/invoices/${inv.id}`}>{inv.invoice_ref}</NavLink>
                   </td>
                   <td>{inv.supplier}</td>
-                  <td>{inv.invoice_date}</td>
+                  <td>{fmtDate(inv.invoice_date)}</td>
                   <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
                   <td>{inv.total_amount != null ? `$${inv.total_amount.toFixed(2)}` : "-"}</td>
                 </tr>

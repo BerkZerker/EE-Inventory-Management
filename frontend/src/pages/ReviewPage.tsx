@@ -3,6 +3,7 @@ import { useInvoiceReview } from "@/hooks/useInvoiceReview";
 import CostFields from "@/components/CostFields";
 import InvoiceItemsTable from "@/components/InvoiceItemsTable";
 import NewProductModal from "@/components/NewProductModal";
+import { fmtDate } from "@/fmt";
 
 export default function ReviewPage() {
   const {
@@ -64,7 +65,7 @@ export default function ReviewPage() {
           <span className={`badge ${invoice.status}`}>{invoice.status}</span>
         </h2>
         <p>
-          {invoice.supplier} &mdash; {invoice.invoice_date}
+          {invoice.supplier} &mdash; {fmtDate(invoice.invoice_date)}
         </p>
       </div>
 
