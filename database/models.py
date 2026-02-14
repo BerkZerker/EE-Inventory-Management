@@ -452,7 +452,7 @@ def get_invoice_items(
 # Bikes
 # ---------------------------------------------------------------------------
 
-_VALID_BIKE_STATUSES = {"available", "sold", "returned", "damaged"}
+_VALID_BIKE_STATUSES = {"available", "in_transit", "sold", "returned", "damaged"}
 
 _BIKE_UPDATE_ALLOWED = {
     "serial_number",
@@ -477,6 +477,7 @@ def create_bike(
     invoice_id: int | None = None,
     shopify_variant_id: str | None = None,
     date_received: str | None = None,
+    status: str = "available",
     notes: str | None = None,
     commit: bool = True,
 ) -> dict[str, Any]:
@@ -485,8 +486,8 @@ def create_bike(
         """
         INSERT INTO bikes
             (serial_number, product_id, actual_cost, invoice_id,
-             shopify_variant_id, date_received, notes)
-        VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?)
+             shopify_variant_id, date_received, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             serial_number,
@@ -495,6 +496,7 @@ def create_bike(
             invoice_id,
             shopify_variant_id,
             date_received,
+            status,
             notes,
         ),
     )
@@ -520,6 +522,7 @@ def create_bikes_bulk(
             b.get("invoice_id"),
             b.get("shopify_variant_id"),
             b.get("date_received"),
+            b.get("status", "available"),
             b.get("notes"),
         )
         for b in bikes
@@ -528,8 +531,8 @@ def create_bikes_bulk(
         """
         INSERT INTO bikes
             (serial_number, product_id, actual_cost, invoice_id,
-             shopify_variant_id, date_received, notes)
-        VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?)
+             shopify_variant_id, date_received, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows_data,
     )
@@ -567,9 +570,11 @@ def list_bikes(
 ) -> list[dict[str, Any]]:
     """Return bikes with product info, optionally filtered and paginated."""
     sql = """
-        SELECT b.*, p.sku, p.brand, p.model, p.color, p.size, p.retail_price
+        SELECT b.*, p.sku, p.brand, p.model, p.color, p.size, p.retail_price,
+               i.invoice_ref, i.supplier, i.invoice_date
         FROM bikes b
         JOIN products p ON b.product_id = p.id
+        LEFT JOIN invoices i ON b.invoice_id = i.id
     """
     conditions: list[str] = []
     params: list[Any] = []
@@ -682,6 +687,39 @@ def delete_bikes_by_product(conn: sqlite3.Connection, product_id: int) -> list[d
         conn.execute("DELETE FROM bikes WHERE product_id = ?", (product_id,))
         conn.commit()
     return bikes
+
+
+def receive_bikes(
+    conn: sqlite3.Connection,
+    bike_ids: list[int],
+) -> list[dict[str, Any]]:
+    """Mark in-transit bikes as available and set date_received to now.
+
+    Only updates bikes that are currently ``in_transit``; already-available
+    bikes are silently skipped.  Returns the updated bike dicts with
+    product join info.
+    """
+    if not bike_ids:
+        return []
+    placeholders = ",".join("?" for _ in bike_ids)
+    now = _now()
+    conn.execute(
+        f"UPDATE bikes SET status = 'available', date_received = ? "  # noqa: S608
+        f"WHERE id IN ({placeholders}) AND status = 'in_transit'",
+        [now, *bike_ids],
+    )
+    conn.commit()
+    return _rows_to_list(
+        conn.execute(
+            f"""
+            SELECT b.*, p.sku, p.brand, p.model, p.color, p.size, p.retail_price
+            FROM bikes b
+            JOIN products p ON b.product_id = p.id
+            WHERE b.id IN ({placeholders})
+            """,
+            bike_ids,
+        ).fetchall()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +838,8 @@ def get_inventory_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 COUNT(b.id)                                     AS total_bikes,
                 SUM(CASE WHEN b.status = 'available' THEN 1 ELSE 0 END)
                                                                 AS available,
+                SUM(CASE WHEN b.status = 'in_transit' THEN 1 ELSE 0 END)
+                                                                AS in_transit,
                 SUM(CASE WHEN b.status = 'sold' THEN 1 ELSE 0 END)
                                                                 AS sold,
                 SUM(CASE WHEN b.status = 'returned' THEN 1 ELSE 0 END)

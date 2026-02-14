@@ -295,9 +295,10 @@ export default function InventoryPage() {
     (acc, s) => ({
       total: acc.total + s.total_bikes,
       available: acc.available + s.available,
+      inTransit: acc.inTransit + s.in_transit,
       sold: acc.sold + s.sold,
     }),
-    { total: 0, available: 0, sold: 0 },
+    { total: 0, available: 0, inTransit: 0, sold: 0 },
   );
 
   const brandGroups = groupByBrand(summary);
@@ -319,6 +320,10 @@ export default function InventoryPage() {
         <div className="stat-card">
           <div className="label">Available</div>
           <div className="value">{totals.available}</div>
+        </div>
+        <div className="stat-card">
+          <div className="label">In Transit</div>
+          <div className="value">{totals.inTransit}</div>
         </div>
         <div className="stat-card">
           <div className="label">Sold</div>
@@ -465,7 +470,7 @@ export default function InventoryPage() {
                     <td>{bike.brand ?? ""} {bike.model ?? ""}</td>
                     <td><span className={`badge ${bike.status}`}>{bike.status}</span></td>
                     <td>${bike.actual_cost.toFixed(2)}</td>
-                    <td>{fmtDateTime(bike.date_received)}</td>
+                    <td>{bike.date_received ? fmtDateTime(bike.date_received) : "-"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -538,6 +543,7 @@ export default function InventoryPage() {
                           <td>{v.size ?? "-"}</td>
                           <td>
                             <span className="badge available">{v.available}</span>
+                            {v.in_transit > 0 && <>{" "}<span className="badge in_transit">{v.in_transit} in transit</span></>}
                             {" / "}
                             {v.total_bikes}
                             {v.sold > 0 && <span style={{ color: "#8a8a8a", marginLeft: "0.5rem" }}>({v.sold} sold)</span>}
@@ -569,6 +575,7 @@ export default function InventoryPage() {
                                             style={{ fontSize: "0.8rem" }}
                                           >
                                             <option value="available">Available</option>
+                                            <option value="in_transit">In Transit</option>
                                             <option value="sold">Sold</option>
                                             <option value="returned">Returned</option>
                                             <option value="damaged">Damaged</option>
@@ -599,7 +606,7 @@ export default function InventoryPage() {
                                         <>
                                           <span className={`badge ${bike.status}`}>{bike.status}</span>
                                           <span><span style={{ color: "var(--color-text-secondary)" }}>Cost:</span> ${bike.actual_cost.toFixed(2)}</span>
-                                          <span><span style={{ color: "var(--color-text-secondary)" }}>Received:</span> {fmtDateTime(bike.date_received)}</span>
+                                          <span><span style={{ color: "var(--color-text-secondary)" }}>Received:</span> {bike.date_received ? fmtDateTime(bike.date_received) : "-"}</span>
                                           {bike.notes && <span style={{ color: "var(--color-text-secondary)", fontStyle: "italic" }}>{bike.notes}</span>}
                                           <button className="sm" onClick={() => startEditBike(bike)}>Edit</button>
                                           <button className="danger sm" onClick={() => deleteBike(bike)}>Delete</button>

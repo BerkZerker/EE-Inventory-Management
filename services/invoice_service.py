@@ -123,6 +123,8 @@ def approve_invoice(
                     "product_id": item["product_id"],
                     "actual_cost": alloc_cost,
                     "invoice_id": invoice_id,
+                    "status": "in_transit",
+                    "date_received": None,
                 }
             )
             serial_idx += 1
@@ -132,10 +134,8 @@ def approve_invoice(
     # Update invoice status
     models.update_invoice_status(conn, invoice_id, "approved", approved_by=approved_by)
 
-    # Push new bikes to Shopify as variants
+    # Shopify push is deferred until bikes are received (marked available)
     shopify_warnings: list[str] = []
-    if push_to_shopify:
-        shopify_warnings = _push_bikes_to_shopify(conn, bikes)
 
     # Return final state
     final_invoice = models.get_invoice_with_items(conn, invoice_id)
@@ -144,6 +144,19 @@ def approve_invoice(
         "bikes": bikes,
         "shopify_warnings": shopify_warnings,
     }
+
+
+def receive_bikes(
+    conn: sqlite3.Connection,
+    bike_ids: list[int],
+) -> dict[str, Any]:
+    """Mark in-transit bikes as received and push them to Shopify.
+
+    Returns dict with keys: bikes, shopify_warnings.
+    """
+    bikes = models.receive_bikes(conn, bike_ids)
+    shopify_warnings = _push_bikes_to_shopify(conn, bikes) if bikes else []
+    return {"bikes": bikes, "shopify_warnings": shopify_warnings}
 
 
 def _push_bikes_to_shopify(

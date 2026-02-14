@@ -75,6 +75,53 @@ def _migrate_invoice_item_parsed_fields(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_bike_in_transit_status(conn: sqlite3.Connection) -> None:
+    """Rebuild bikes table to add 'in_transit' status and make date_received nullable."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='bikes'"
+    ).fetchone()
+    if row is None or "in_transit" in row[0]:
+        return  # Table missing or already migrated
+
+    conn.executescript("""
+        CREATE TABLE bikes_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            serial_number   TEXT NOT NULL UNIQUE,
+            product_id      INTEGER NOT NULL REFERENCES products(id),
+            invoice_id      INTEGER REFERENCES invoices(id),
+            shopify_variant_id TEXT,
+            actual_cost     REAL NOT NULL DEFAULT 0,
+            date_received   TEXT,
+            status          TEXT NOT NULL DEFAULT 'available'
+                            CHECK (status IN ('available', 'in_transit', 'sold', 'returned', 'damaged')),
+            date_sold       TEXT,
+            sale_price      REAL,
+            shopify_order_id TEXT,
+            notes           TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO bikes_new
+            (id, serial_number, product_id, invoice_id, shopify_variant_id,
+             actual_cost, date_received, status, date_sold, sale_price,
+             shopify_order_id, notes, created_at)
+        SELECT
+            id, serial_number, product_id, invoice_id, shopify_variant_id,
+            actual_cost, date_received, status, date_sold, sale_price,
+            shopify_order_id, notes, created_at
+        FROM bikes;
+
+        DROP TABLE bikes;
+        ALTER TABLE bikes_new RENAME TO bikes;
+
+        CREATE INDEX IF NOT EXISTS idx_bikes_product ON bikes(product_id);
+        CREATE INDEX IF NOT EXISTS idx_bikes_status ON bikes(status);
+        CREATE INDEX IF NOT EXISTS idx_bikes_invoice ON bikes(invoice_id);
+        CREATE INDEX IF NOT EXISTS idx_bikes_serial ON bikes(serial_number);
+        CREATE INDEX IF NOT EXISTS idx_bikes_shopify_variant ON bikes(shopify_variant_id);
+    """)
+
+
 def init_database(db_path: str) -> None:
     """Create all tables by executing schema.sql.
 
@@ -88,4 +135,5 @@ def init_database(db_path: str) -> None:
     _migrate_invoice_fee_columns(conn)
     _migrate_brand_model(conn)
     _migrate_invoice_item_parsed_fields(conn)
+    _migrate_bike_in_transit_status(conn)
     conn.close()

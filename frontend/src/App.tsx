@@ -5,6 +5,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import DashboardPage from "@/pages/DashboardPage";
 import InvoiceListPage from "@/pages/InvoiceListPage";
 import ReviewPage from "@/pages/ReviewPage";
+import InTransitPage from "@/pages/InTransitPage";
 import InventoryPage from "@/pages/InventoryPage";
 import ReportPage from "@/pages/ReportPage";
 import ScrapeImportPage from "@/pages/ScrapeImportPage";
@@ -36,6 +37,7 @@ function App() {
           <nav>
             <NavLink to="/" end>Dashboard</NavLink>
             <NavLink to="/invoices">Invoices</NavLink>
+            <NavLink to="/in-transit">In Transit</NavLink>
             <NavLink to="/inventory">Inventory</NavLink>
             <NavLink to="/reports">Reports</NavLink>
             <NavLink to="/scrape">Brand Scraper</NavLink>
@@ -47,6 +49,7 @@ function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/invoices" element={<InvoiceListPage />} />
               <Route path="/invoices/:id" element={<ReviewPage />} />
+              <Route path="/in-transit" element={<InTransitPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/reports" element={<ReportPage />} />
               <Route path="/scrape" element={<ScrapeImportPage />} />

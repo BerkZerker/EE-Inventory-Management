@@ -61,9 +61,9 @@ CREATE TABLE IF NOT EXISTS bikes (
     invoice_id      INTEGER REFERENCES invoices(id),
     shopify_variant_id TEXT,
     actual_cost     REAL NOT NULL DEFAULT 0,              -- What we paid for THIS bike
-    date_received   TEXT NOT NULL DEFAULT (datetime('now')),
+    date_received   TEXT,
     status          TEXT NOT NULL DEFAULT 'available'
-                    CHECK (status IN ('available', 'sold', 'returned', 'damaged')),
+                    CHECK (status IN ('available', 'in_transit', 'sold', 'returned', 'damaged')),
     date_sold       TEXT,
     sale_price      REAL,
     shopify_order_id TEXT,

@@ -5,7 +5,7 @@ import { fmtDate } from "@/fmt";
 import type { InventorySummary, Invoice } from "@/types";
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({ totalBikes: 0, available: 0, sold: 0, totalProducts: 0 });
+  const [stats, setStats] = useState({ totalBikes: 0, available: 0, inTransit: 0, sold: 0, totalProducts: 0 });
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -22,9 +22,10 @@ export default function DashboardPage() {
           (acc, s) => ({
             totalBikes: acc.totalBikes + s.total_bikes,
             available: acc.available + s.available,
+            inTransit: acc.inTransit + s.in_transit,
             sold: acc.sold + s.sold,
           }),
-          { totalBikes: 0, available: 0, sold: 0 },
+          { totalBikes: 0, available: 0, inTransit: 0, sold: 0 },
         );
         setStats({ ...totals, totalProducts: productsResp.data.length });
         setRecentInvoices(invoicesResp.data.slice(0, 5));
@@ -58,6 +59,12 @@ export default function DashboardPage() {
           <div className="stat-card stat-card-link">
             <div className="label">Available</div>
             <div className="value">{loading ? "-" : stats.available}</div>
+          </div>
+        </NavLink>
+        <NavLink to="/in-transit" style={{ textDecoration: "none" }}>
+          <div className="stat-card stat-card-link">
+            <div className="label">In Transit</div>
+            <div className="value">{loading ? "-" : stats.inTransit}</div>
           </div>
         </NavLink>
         <NavLink to="/inventory" style={{ textDecoration: "none" }}>

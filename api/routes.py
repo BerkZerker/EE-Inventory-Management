@@ -21,6 +21,7 @@ from services.invoice_parser import (
 )
 from services.invoice_service import approve_invoice as _approve_invoice
 from services.invoice_service import check_duplicate_invoice
+from services.invoice_service import receive_bikes as _receive_bikes
 from services.serial_generator import peek_next_serials
 from utils.sku import generate_sku
 
@@ -515,6 +516,22 @@ def list_bikes() -> tuple:
         offset=offset,
     )
     return jsonify(bikes), 200
+
+
+@api_bp.route("/bikes/receive", methods=["POST"])
+@handle_errors
+def receive_bikes() -> tuple:
+    """Mark in-transit bikes as received and push to Shopify."""
+    data = request.get_json()
+    if not data or "bike_ids" not in data:
+        return error_response("Request body must include 'bike_ids' list", 400)
+
+    bike_ids = data["bike_ids"]
+    if not isinstance(bike_ids, list) or not bike_ids:
+        return error_response("'bike_ids' must be a non-empty list", 400)
+
+    result = _receive_bikes(g.db, bike_ids)
+    return jsonify(result), 200
 
 
 @api_bp.route("/bikes/<int:bike_id>", methods=["PUT"])

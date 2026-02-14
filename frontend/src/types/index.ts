@@ -58,8 +58,8 @@ export interface Bike {
   invoice_id: number | null;
   shopify_variant_id: string | null;
   actual_cost: number;
-  date_received: string;
-  status: "available" | "sold" | "returned" | "damaged";
+  date_received: string | null;
+  status: "available" | "in_transit" | "sold" | "returned" | "damaged";
   date_sold: string | null;
   sale_price: number | null;
   shopify_order_id: string | null;
@@ -72,6 +72,9 @@ export interface Bike {
   color?: string;
   size?: string;
   retail_price?: number;
+  invoice_ref?: string;
+  supplier?: string;
+  invoice_date?: string;
 }
 
 /** Aggregated per-product inventory summary. */
@@ -85,6 +88,7 @@ export interface InventorySummary {
   retail_price: number;
   total_bikes: number;
   available: number;
+  in_transit: number;
   sold: number;
   returned: number;
   damaged: number;
