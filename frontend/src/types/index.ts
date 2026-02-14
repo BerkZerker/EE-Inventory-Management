@@ -112,3 +112,29 @@ export interface ProfitByProduct {
   total_profit: number;
   margin_pct: number;
 }
+
+/** Scraped product from brand website. */
+export interface ScrapedProduct {
+  brand: string;
+  model: string;
+  color: string | null;
+  size: string | null;
+  retail_price: number;
+}
+
+/** Result from scraping a brand website. */
+export interface ScrapeResult {
+  brand_name: string;
+  source_url: string;
+  strategy: string;
+  products: ScrapedProduct[];
+  errors: string[];
+}
+
+/** Result from importing scraped products. */
+export interface ScrapeImportResult {
+  created: Array<{ brand: string; model: string; color?: string; size?: string }>;
+  created_count: number;
+  skipped: Array<{ brand: string; model: string; color?: string; size?: string; reason: string }>;
+  skipped_count: number;
+}

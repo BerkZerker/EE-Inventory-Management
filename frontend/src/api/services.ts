@@ -1,5 +1,5 @@
 import apiClient from "./client";
-import type { Product, Invoice, Bike, InventorySummary, ProfitSummary, ProfitByProduct } from "@/types";
+import type { Product, Invoice, Bike, InventorySummary, ProfitSummary, ProfitByProduct, ScrapedProduct, ScrapeResult, ScrapeImportResult } from "@/types";
 
 export const productApi = {
   list: () => apiClient.get<Product[]>("/products"),
@@ -7,6 +7,11 @@ export const productApi = {
     apiClient.post<Product>("/products", data),
   update: (id: number, data: Partial<Product>) => apiClient.put<Product>(`/products/${id}`, data),
   delete: (id: number) => apiClient.delete(`/products/${id}`),
+  bulkDelete: (productIds: number[]) =>
+    apiClient.delete<{ message: string; deleted_count: number; bikes_deleted: number; shopify_warnings?: string[] }>(
+      "/products/bulk",
+      { data: { product_ids: productIds } },
+    ),
 };
 
 export const invoiceApi = {
@@ -46,4 +51,11 @@ export const reportApi = {
     apiClient.get<{ summary: ProfitSummary; by_product: ProfitByProduct[] }>("/reports/profit", {
       params: { start, end },
     }),
+};
+
+export const scrapeApi = {
+  scrape: (data: { url: string; brand_name: string }) =>
+    apiClient.post<ScrapeResult>("/scrape/brand", data),
+  import: (products: ScrapedProduct[]) =>
+    apiClient.post<ScrapeImportResult>("/scrape/import", { products }),
 };

@@ -7,6 +7,7 @@ import InvoiceListPage from "@/pages/InvoiceListPage";
 import ReviewPage from "@/pages/ReviewPage";
 import InventoryPage from "@/pages/InventoryPage";
 import ReportPage from "@/pages/ReportPage";
+import ScrapeImportPage from "@/pages/ScrapeImportPage";
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -37,6 +38,7 @@ function App() {
             <NavLink to="/invoices">Invoices</NavLink>
             <NavLink to="/inventory">Inventory</NavLink>
             <NavLink to="/reports">Reports</NavLink>
+            <NavLink to="/scrape">Brand Scraper</NavLink>
           </nav>
         </aside>
         <main className="main-content">
@@ -47,6 +49,7 @@ function App() {
               <Route path="/invoices/:id" element={<ReviewPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/reports" element={<ReportPage />} />
+              <Route path="/scrape" element={<ScrapeImportPage />} />
             </Routes>
           </ErrorBoundary>
         </main>

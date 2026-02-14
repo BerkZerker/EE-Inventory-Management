@@ -150,7 +150,15 @@ def update_product(
 
 
 def delete_product(conn: sqlite3.Connection, product_id: int) -> bool:
-    """Delete a product by ID. Returns True if a row was deleted."""
+    """Delete a product by ID. Returns True if a row was deleted.
+
+    Clears invoice_items.product_id references first (SET NULL) so the
+    FK constraint is not violated.
+    """
+    conn.execute(
+        "UPDATE invoice_items SET product_id = NULL WHERE product_id = ?",
+        (product_id,),
+    )
     cur = conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
     conn.commit()
     return cur.rowcount > 0

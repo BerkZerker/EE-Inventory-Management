@@ -188,6 +188,23 @@ export default function InventoryPage() {
     }
   };
 
+  const bulkDeleteModel = async (brand: string, modelGroup: ModelGroup) => {
+    const totalBikes = modelGroup.variants.reduce((sum, v) => sum + v.total_bikes, 0);
+    const msg = totalBikes > 0
+      ? `Delete all ${modelGroup.variants.length} variants of "${brand} ${modelGroup.model}" and their ${totalBikes} bike(s)?\n\nThis will also remove Shopify variants.`
+      : `Delete all ${modelGroup.variants.length} variants of "${brand} ${modelGroup.model}"?`;
+    if (!confirm(msg)) return;
+    try {
+      const ids = modelGroup.variants.map((v) => v.product_id);
+      await productApi.bulkDelete(ids);
+      setExpandedProduct(null);
+      loadSummary();
+      loadProducts();
+    } catch (err) {
+      setError(extractErrorMessage(err, "Bulk delete failed"));
+    }
+  };
+
   // Add Stock
   const submitAddStock = async () => {
     setError(null);
@@ -479,7 +496,17 @@ export default function InventoryPage() {
             </h3>
             {!collapsedBrands.has(brandGroup.brand) && brandGroup.models.map((modelGroup) => (
               <div key={modelGroup.model} style={{ marginLeft: "1rem", marginBottom: "1rem" }}>
-                <h4 style={{ marginBottom: "0.5rem", color: "#525252" }}>{modelGroup.model}</h4>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                  <h4 style={{ margin: 0, color: "#525252" }}>{modelGroup.model}</h4>
+                  {modelGroup.variants.length > 1 && (
+                    <button
+                      className="danger sm"
+                      onClick={() => bulkDeleteModel(brandGroup.brand, modelGroup)}
+                    >
+                      Delete All Variants ({modelGroup.variants.length})
+                    </button>
+                  )}
+                </div>
                 <div className="table-responsive"><table className="inventory-table">
                   <colgroup>
                     <col style={{ width: "20%" }} />

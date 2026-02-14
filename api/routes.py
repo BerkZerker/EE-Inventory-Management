@@ -435,6 +435,52 @@ def delete_product(product_id: int) -> tuple:
     return jsonify(result), 200
 
 
+@api_bp.route("/products/bulk", methods=["DELETE"])
+@handle_errors
+def bulk_delete_products() -> tuple:
+    """Delete multiple products and their bikes + Shopify variants."""
+    data = request.get_json()
+    if not data or "product_ids" not in data:
+        return error_response("Request body must include 'product_ids' list", 400)
+
+    product_ids = data["product_ids"]
+    if not isinstance(product_ids, list) or not product_ids:
+        return error_response("'product_ids' must be a non-empty list", 400)
+
+    deleted_count = 0
+    total_bikes_deleted = 0
+    shopify_warnings: list[str] = []
+
+    for pid in product_ids:
+        product = models.get_product(g.db, pid)
+        if product is None:
+            continue
+
+        bikes = models.delete_bikes_by_product(g.db, pid)
+        total_bikes_deleted += len(bikes)
+
+        variant_ids = [b["shopify_variant_id"] for b in bikes if b.get("shopify_variant_id")]
+        if variant_ids and product.get("shopify_product_id"):
+            try:
+                from services.shopify_sync import delete_variants
+                delete_variants(product, variant_ids)
+            except Exception:
+                logger.warning("Shopify variant cleanup failed for product %s", pid, exc_info=True)
+                shopify_warnings.append(f"Shopify cleanup failed for {product['brand']} {product['model']}")
+
+        models.delete_product(g.db, pid)
+        deleted_count += 1
+
+    result: dict[str, Any] = {
+        "message": f"Deleted {deleted_count} product(s)",
+        "deleted_count": deleted_count,
+        "bikes_deleted": total_bikes_deleted,
+    }
+    if shopify_warnings:
+        result["shopify_warnings"] = shopify_warnings
+    return jsonify(result), 200
+
+
 # ===========================================================================
 # Bike / report endpoints
 # ===========================================================================
@@ -682,3 +728,123 @@ def reconcile() -> tuple:
 
     results = reconcile_inventory(g.db)
     return jsonify({"mismatches": results, "total_mismatches": len(results)}), 200
+
+
+# ===========================================================================
+# Brand scraper endpoints
+# ===========================================================================
+
+
+@api_bp.route("/scrape/brand", methods=["POST"])
+@handle_errors
+def scrape_brand() -> tuple:
+    """Scrape a brand website for product catalog data."""
+    data = request.get_json()
+    if not data:
+        return error_response("Request body must be JSON", 400)
+
+    url = data.get("url")
+    brand_name = data.get("brand_name")
+    if not url or not brand_name:
+        return error_response("Missing required fields: url, brand_name", 400)
+
+    from services.brand_scraper import ScrapeError, scrape_brand_with_retry
+
+    try:
+        result = scrape_brand_with_retry(url, brand_name)
+    except ScrapeError as exc:
+        return error_response(str(exc), 422)
+
+    return jsonify(result.model_dump()), 200
+
+
+@api_bp.route("/scrape/import", methods=["POST"])
+@handle_errors
+def scrape_import() -> tuple:
+    """Batch-import scraped products into the catalog."""
+    data = request.get_json()
+    if not data or "products" not in data:
+        return error_response("Request body must include 'products' list", 400)
+
+    products = data["products"]
+    if not isinstance(products, list) or not products:
+        return error_response("'products' must be a non-empty list", 400)
+
+    created: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for item in products:
+        brand = item.get("brand")
+        model_name = item.get("model")
+        retail_price = item.get("retail_price")
+
+        if not brand or not model_name or retail_price is None:
+            skipped.append({
+                "brand": brand or "",
+                "model": model_name or "",
+                "color": item.get("color"),
+                "size": item.get("size"),
+                "reason": "Missing required fields (brand, model, retail_price)",
+            })
+            continue
+
+        try:
+            price = float(retail_price)
+            if price < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            skipped.append({
+                "brand": brand,
+                "model": model_name,
+                "color": item.get("color"),
+                "size": item.get("size"),
+                "reason": "Invalid retail_price",
+            })
+            continue
+
+        color = item.get("color") or None
+        size = item.get("size") or None
+
+        sku = generate_sku(brand, model_name, color or "", size or "")
+
+        product = models.create_product(
+            g.db,
+            sku=sku,
+            brand=brand,
+            model=model_name,
+            retail_price=price,
+            color=color,
+            size=size,
+        )
+
+        if product is None:
+            skipped.append({
+                "brand": brand,
+                "model": model_name,
+                "color": color,
+                "size": size,
+                "reason": f"Duplicate SKU: {sku}",
+            })
+            continue
+
+        # Push to Shopify (best-effort)
+        try:
+            from services.shopify_sync import ensure_shopify_product
+
+            ensure_shopify_product(g.db, product)
+        except Exception:
+            logger.warning("Shopify push failed for scraped product %s", sku, exc_info=True)
+
+        created.append({
+            "brand": brand,
+            "model": model_name,
+            "color": color,
+            "size": size,
+        })
+
+    return jsonify({
+        "created": created,
+        "created_count": len(created),
+        "skipped": skipped,
+        "skipped_count": len(skipped),
+    }), 200
