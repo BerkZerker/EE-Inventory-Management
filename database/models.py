@@ -658,6 +658,24 @@ def update_bike(
     return get_bike(conn, bike_id)
 
 
+def delete_bike(conn: sqlite3.Connection, bike_id: int) -> bool:
+    """Delete a bike by ID. Returns True if a row was deleted."""
+    cur = conn.execute("DELETE FROM bikes WHERE id = ?", (bike_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_bikes_by_product(conn: sqlite3.Connection, product_id: int) -> list[dict[str, Any]]:
+    """Delete all bikes for a product. Returns the deleted bikes (for Shopify cleanup)."""
+    bikes = _rows_to_list(
+        conn.execute("SELECT * FROM bikes WHERE product_id = ?", (product_id,)).fetchall()
+    )
+    if bikes:
+        conn.execute("DELETE FROM bikes WHERE product_id = ?", (product_id,))
+        conn.commit()
+    return bikes
+
+
 # ---------------------------------------------------------------------------
 # Serial Counter
 # ---------------------------------------------------------------------------

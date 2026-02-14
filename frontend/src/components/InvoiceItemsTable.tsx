@@ -18,7 +18,7 @@ export default function InvoiceItemsTable({
   onProductChange,
 }: Props) {
   return (
-    <table>
+    <div className="table-responsive"><table>
       <thead>
         <tr>
           <th>Description</th>
@@ -34,7 +34,7 @@ export default function InvoiceItemsTable({
             <td>
               <div>{item.description}</div>
               {(item.parsed_brand || item.parsed_model || item.parsed_color || item.parsed_size) && (
-                <div style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.25rem" }}>
+                <div style={{ fontSize: "0.75rem", color: "#8a8a8a", marginTop: "0.25rem" }}>
                   {[item.parsed_brand, item.parsed_model, item.parsed_color, item.parsed_size]
                     .filter(Boolean)
                     .join(" · ")}
@@ -96,7 +96,7 @@ export default function InvoiceItemsTable({
               {item.allocated_cost != null
                 ? `$${item.allocated_cost.toFixed(2)}`
                 : isPending && previewAllocated.has(item.id)
-                  ? <span style={{ color: "#6b7280" }}>
+                  ? <span style={{ color: "#8a8a8a" }}>
                       ~${(previewAllocated.get(item.id) ?? 0).toFixed(2)}
                     </span>
                   : "-"}
@@ -104,6 +104,6 @@ export default function InvoiceItemsTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }

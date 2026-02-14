@@ -39,9 +39,12 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>Dashboard</h2>
-        <p>Welcome to the E-Bike Inventory Management System.</p>
+      <div className="page-header" style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+        <img src="/ee-icon-hd.svg" alt="" style={{ width: 40, height: 40 }} />
+        <div>
+          <h2>Dashboard</h2>
+          <p>Welcome to the E-Bike Inventory Management System.</p>
+        </div>
       </div>
 
       <div className="stats-grid">
@@ -89,7 +92,7 @@ export default function DashboardPage() {
       {recentInvoices.length > 0 && (
         <div style={{ marginTop: "0.5rem" }}>
           <h3>Recent Invoices</h3>
-          <table>
+          <div className="table-responsive"><table>
             <thead>
               <tr>
                 <th>Invoice #</th>
@@ -112,7 +115,7 @@ export default function DashboardPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>

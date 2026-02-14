@@ -158,7 +158,6 @@ export default function ProductsPage() {
               <th>Model</th>
               <th>Color</th>
               <th>Size</th>
-              <th>SKU</th>
               <th>Price</th>
               <th>Actions</th>
             </tr>
@@ -170,7 +169,6 @@ export default function ProductsPage() {
                 <td>{p.model}</td>
                 <td>{p.color ?? "-"}</td>
                 <td>{p.size ?? "-"}</td>
-                <td>{p.sku}</td>
                 <td>${p.retail_price.toFixed(2)}</td>
                 <td>
                   <button

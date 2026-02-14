@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { NavLink } from "react-router-dom";
 import { reportApi } from "@/api/services";
 import { DEFAULT_REPORT_DAYS, MS_PER_DAY } from "@/constants";
 import type { ProfitSummary, ProfitByProduct } from "@/types";
@@ -90,7 +91,7 @@ export default function ReportPage() {
           </div>
 
           {byProduct.length > 0 ? (
-            <table>
+            <div className="table-responsive"><table>
               <thead>
                 <tr>
                   <th>SKU</th>
@@ -106,7 +107,7 @@ export default function ReportPage() {
                 {byProduct.map((row) => (
                   <tr key={row.product_id}>
                     <td>{row.sku}</td>
-                    <td>{row.brand} {row.model}</td>
+                    <td><NavLink to="/inventory" style={{ fontWeight: 500 }}>{row.brand} {row.model}</NavLink></td>
                     <td>{row.units_sold}</td>
                     <td>${row.total_revenue.toFixed(2)}</td>
                     <td>${row.total_cost.toFixed(2)}</td>
@@ -115,7 +116,7 @@ export default function ReportPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           ) : (
             <div className="empty-state">
               <p>No sales in this date range.</p>

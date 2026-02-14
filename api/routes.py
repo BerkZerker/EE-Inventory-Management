@@ -410,12 +410,29 @@ def update_product(product_id: int) -> tuple:
 @api_bp.route("/products/<int:product_id>", methods=["DELETE"])
 @handle_errors
 def delete_product(product_id: int) -> tuple:
-    """Delete a product."""
-    deleted = models.delete_product(g.db, product_id)
-    if not deleted:
+    """Delete a product and cascade-delete its bikes + Shopify variants."""
+    product = models.get_product(g.db, product_id)
+    if product is None:
         return error_response("Product not found", 404)
 
-    return jsonify({"message": "Product deleted"}), 200
+    bikes = models.delete_bikes_by_product(g.db, product_id)
+
+    shopify_warning = None
+    variant_ids = [b["shopify_variant_id"] for b in bikes if b.get("shopify_variant_id")]
+    if variant_ids and product.get("shopify_product_id"):
+        try:
+            from services.shopify_sync import delete_variants
+            delete_variants(product, variant_ids)
+        except Exception:
+            logger.warning("Shopify variant cleanup failed for product %s", product_id, exc_info=True)
+            shopify_warning = "Product deleted locally but some Shopify variants may remain"
+
+    models.delete_product(g.db, product_id)
+
+    result: dict[str, Any] = {"message": "Product deleted", "bikes_deleted": len(bikes)}
+    if shopify_warning:
+        result["shopify_warning"] = shopify_warning
+    return jsonify(result), 200
 
 
 # ===========================================================================
@@ -452,6 +469,61 @@ def list_bikes() -> tuple:
         offset=offset,
     )
     return jsonify(bikes), 200
+
+
+@api_bp.route("/bikes/<int:bike_id>", methods=["PUT"])
+@handle_errors
+def update_bike(bike_id: int) -> tuple:
+    """Update a bike's editable fields."""
+    data = request.get_json()
+    if not data:
+        return error_response("Request body must be JSON", 400)
+
+    bike = models.get_bike(g.db, bike_id)
+    if bike is None:
+        return error_response("Bike not found", 404)
+
+    allowed = {"actual_cost", "status", "notes", "date_received"}
+    update_fields: dict[str, Any] = {}
+    for key in allowed:
+        if key in data:
+            update_fields[key] = data[key]
+
+    if not update_fields:
+        return error_response("No valid fields to update", 400)
+
+    updated = models.update_bike(g.db, bike_id, **update_fields)
+    if updated is None:
+        return error_response("Bike not found", 404)
+
+    return jsonify(updated), 200
+
+
+@api_bp.route("/bikes/<int:bike_id>", methods=["DELETE"])
+@handle_errors
+def delete_bike(bike_id: int) -> tuple:
+    """Delete a bike and its Shopify variant."""
+    bike = models.get_bike(g.db, bike_id)
+    if bike is None:
+        return error_response("Bike not found", 404)
+
+    shopify_warning = None
+    if bike.get("shopify_variant_id"):
+        try:
+            product = models.get_product(g.db, bike["product_id"])
+            if product and product.get("shopify_product_id"):
+                from services.shopify_sync import delete_variants
+                delete_variants(product, [bike["shopify_variant_id"]])
+        except Exception:
+            logger.warning("Shopify variant deletion failed for bike %s", bike_id, exc_info=True)
+            shopify_warning = "Bike deleted locally but Shopify variant removal failed"
+
+    models.delete_bike(g.db, bike_id)
+
+    result: dict[str, Any] = {"message": "Bike deleted"}
+    if shopify_warning:
+        result["shopify_warning"] = shopify_warning
+    return jsonify(result), 200
 
 
 @api_bp.route("/inventory/summary", methods=["GET"])

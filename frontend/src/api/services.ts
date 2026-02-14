@@ -30,6 +30,9 @@ export const bikeApi = {
   summary: () => apiClient.get<InventorySummary[]>("/inventory/summary"),
   createManual: (data: { product_id: number; quantity: number; cost_per_bike?: number; notes?: string }) =>
     apiClient.post<{ bikes: Bike[]; count: number; shopify_warnings?: string[] }>("/bikes/manual", data),
+  update: (id: number, data: Partial<Pick<Bike, "actual_cost" | "status" | "notes" | "date_received">>) =>
+    apiClient.put<Bike>(`/bikes/${id}`, data),
+  delete: (id: number) => apiClient.delete(`/bikes/${id}`),
 };
 
 export const serialApi = {

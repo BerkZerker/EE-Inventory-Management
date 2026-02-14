@@ -59,6 +59,10 @@ export default function InventoryPage() {
   const [stockForm, setStockForm] = useState({ product_id: 0, quantity: 1, cost_per_bike: 0, notes: "" });
   const [saving, setSaving] = useState(false);
 
+  // Bike editing
+  const [editingBikeId, setEditingBikeId] = useState<number | null>(null);
+  const [bikeEditForm, setBikeEditForm] = useState({ actual_cost: 0, status: "available" as string, notes: "" });
+
   // Serial counter
   const [nextSerial, setNextSerial] = useState<string>("");
   const [serialValue, setSerialValue] = useState<number>(1);
@@ -169,10 +173,14 @@ export default function InventoryPage() {
     setShowProductForm(true);
   };
 
-  const deleteProduct = async (id: number) => {
-    if (!confirm("Delete this product and all its bikes?")) return;
+  const deleteProduct = async (id: number, name: string, bikeCount: number) => {
+    const msg = bikeCount > 0
+      ? `Delete "${name}" and its ${bikeCount} bike(s)?\n\nThis will also remove Shopify variants.`
+      : `Delete "${name}"?`;
+    if (!confirm(msg)) return;
     try {
       await productApi.delete(id);
+      if (expandedProduct === id) setExpandedProduct(null);
       loadSummary();
       loadProducts();
     } catch {
@@ -209,6 +217,60 @@ export default function InventoryPage() {
       setShowSerialEdit(false);
     } catch (err) {
       setError(extractErrorMessage(err, "Failed to set serial counter"));
+    }
+  };
+
+  // Bike editing
+  const startEditBike = (bike: Bike) => {
+    setEditingBikeId(bike.id);
+    setBikeEditForm({
+      actual_cost: bike.actual_cost,
+      status: bike.status,
+      notes: bike.notes ?? "",
+    });
+  };
+
+  const cancelEditBike = () => {
+    setEditingBikeId(null);
+  };
+
+  const saveEditBike = async () => {
+    if (editingBikeId === null) return;
+    setError(null);
+    setSaving(true);
+    try {
+      await bikeApi.update(editingBikeId, {
+        actual_cost: bikeEditForm.actual_cost,
+        status: bikeEditForm.status as Bike["status"],
+        notes: bikeEditForm.notes || null,
+      });
+      setEditingBikeId(null);
+      // Refresh the expanded bikes list
+      if (expandedProduct !== null) {
+        const resp = await bikeApi.list({ product_id: String(expandedProduct) });
+        setProductBikes(resp.data);
+      }
+      loadSummary();
+    } catch (err) {
+      setError(extractErrorMessage(err, "Failed to update bike"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteBike = async (bike: Bike) => {
+    if (!confirm(`Delete bike ${bike.serial_number}?\n\nThis will also remove the Shopify variant if one exists.`)) return;
+    setError(null);
+    try {
+      await bikeApi.delete(bike.id);
+      // Refresh the expanded bikes list
+      if (expandedProduct !== null) {
+        const resp = await bikeApi.list({ product_id: String(expandedProduct) });
+        setProductBikes(resp.data);
+      }
+      loadSummary();
+    } catch (err) {
+      setError(extractErrorMessage(err, "Failed to delete bike"));
     }
   };
 
@@ -367,9 +429,9 @@ export default function InventoryPage() {
         <div style={{ marginBottom: "1.5rem" }}>
           <h3>Search Results</h3>
           {searchResults.length === 0 ? (
-            <p style={{ color: "#6b7280" }}>No bikes found for "{searchSerial}"</p>
+            <p style={{ color: "#8a8a8a" }}>No bikes found for "{searchSerial}"</p>
           ) : (
-            <table>
+            <div className="table-responsive"><table>
               <thead>
                 <tr>
                   <th>Bike #</th>
@@ -390,7 +452,7 @@ export default function InventoryPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
           <button onClick={() => { setSearchResults(null); setSearchSerial(""); }} style={{ marginTop: "0.5rem" }}>
             Clear Search
@@ -417,8 +479,8 @@ export default function InventoryPage() {
             </h3>
             {!collapsedBrands.has(brandGroup.brand) && brandGroup.models.map((modelGroup) => (
               <div key={modelGroup.model} style={{ marginLeft: "1rem", marginBottom: "1rem" }}>
-                <h4 style={{ marginBottom: "0.5rem", color: "#374151" }}>{modelGroup.model}</h4>
-                <table className="inventory-table">
+                <h4 style={{ marginBottom: "0.5rem", color: "#525252" }}>{modelGroup.model}</h4>
+                <div className="table-responsive"><table className="inventory-table">
                   <colgroup>
                     <col style={{ width: "20%" }} />
                     <col style={{ width: "15%" }} />
@@ -451,30 +513,71 @@ export default function InventoryPage() {
                             <span className="badge available">{v.available}</span>
                             {" / "}
                             {v.total_bikes}
-                            {v.sold > 0 && <span style={{ color: "#6b7280", marginLeft: "0.5rem" }}>({v.sold} sold)</span>}
+                            {v.sold > 0 && <span style={{ color: "#8a8a8a", marginLeft: "0.5rem" }}>({v.sold} sold)</span>}
                           </td>
                           <td>{v.avg_cost != null ? `$${v.avg_cost.toFixed(2)}` : "-"}</td>
                           <td>${v.retail_price.toFixed(2)}</td>
                           <td onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => startEditProduct(v)} style={{ marginRight: "0.5rem" }}>Edit</button>
-                            <button className="danger" onClick={() => deleteProduct(v.product_id)}>Delete</button>
+                            <button className="danger" onClick={() => deleteProduct(v.product_id, `${brandGroup.brand} ${modelGroup.model} ${v.color ?? ""} ${v.size ?? ""}`.trim(), v.total_bikes)}>Delete</button>
                           </td>
                         </tr>
                         {expandedProduct === v.product_id && (
                           <tr key={`${v.product_id}-bikes`}>
-                            <td colSpan={6} style={{ padding: "0.5rem 0 0.5rem 2rem", background: "#eef2ff" }}>
+                            <td colSpan={6} style={{ padding: "0.5rem 0 0.5rem 2rem", background: "var(--color-surface-alt)" }}>
                               {bikesLoading ? (
-                                <div style={{ padding: "0.25rem", color: "#6b7280" }}>Loading bikes...</div>
+                                <div style={{ padding: "0.25rem", color: "var(--color-text-secondary)" }}>Loading bikes...</div>
                               ) : productBikes.length === 0 ? (
-                                <div style={{ padding: "0.25rem", color: "#6b7280" }}>No bikes for this product.</div>
+                                <div style={{ padding: "0.25rem", color: "var(--color-text-secondary)" }}>No bikes for this product.</div>
                               ) : (
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", padding: "0.25rem 0" }}>
                                   {productBikes.map((bike) => (
-                                    <div key={bike.id} style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
-                                      <span style={{ fontWeight: 600 }}>{bike.serial_number}</span>
-                                      <span className={`badge ${bike.status}`}>{bike.status}</span>
-                                      <span><span style={{ color: "#6b7280" }}>Cost:</span> ${bike.actual_cost.toFixed(2)}</span>
-                                      <span><span style={{ color: "#6b7280" }}>Received:</span> {fmtDateTime(bike.date_received)}</span>
+                                    <div key={bike.id} style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+                                      <span style={{ fontWeight: 600, minWidth: "7rem" }}>{bike.serial_number}</span>
+                                      {editingBikeId === bike.id ? (
+                                        <>
+                                          <select
+                                            value={bikeEditForm.status}
+                                            onChange={(e) => setBikeEditForm({ ...bikeEditForm, status: e.target.value })}
+                                            style={{ fontSize: "0.8rem" }}
+                                          >
+                                            <option value="available">Available</option>
+                                            <option value="sold">Sold</option>
+                                            <option value="returned">Returned</option>
+                                            <option value="damaged">Damaged</option>
+                                          </select>
+                                          <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                                            <span style={{ color: "var(--color-text-secondary)", fontSize: "0.8rem" }}>Cost:</span>
+                                            <input
+                                              type="number"
+                                              step="0.01"
+                                              value={bikeEditForm.actual_cost}
+                                              onChange={(e) => setBikeEditForm({ ...bikeEditForm, actual_cost: Number(e.target.value) })}
+                                              style={{ width: "6rem", fontSize: "0.8rem" }}
+                                            />
+                                          </span>
+                                          <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                                            <span style={{ color: "var(--color-text-secondary)", fontSize: "0.8rem" }}>Notes:</span>
+                                            <input
+                                              value={bikeEditForm.notes}
+                                              onChange={(e) => setBikeEditForm({ ...bikeEditForm, notes: e.target.value })}
+                                              placeholder="Notes"
+                                              style={{ width: "10rem", fontSize: "0.8rem" }}
+                                            />
+                                          </span>
+                                          <button className="primary sm" onClick={saveEditBike} disabled={saving}>Save</button>
+                                          <button className="sm" onClick={cancelEditBike}>Cancel</button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className={`badge ${bike.status}`}>{bike.status}</span>
+                                          <span><span style={{ color: "var(--color-text-secondary)" }}>Cost:</span> ${bike.actual_cost.toFixed(2)}</span>
+                                          <span><span style={{ color: "var(--color-text-secondary)" }}>Received:</span> {fmtDateTime(bike.date_received)}</span>
+                                          {bike.notes && <span style={{ color: "var(--color-text-secondary)", fontStyle: "italic" }}>{bike.notes}</span>}
+                                          <button className="sm" onClick={() => startEditBike(bike)}>Edit</button>
+                                          <button className="danger sm" onClick={() => deleteBike(bike)}>Delete</button>
+                                        </>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -485,7 +588,7 @@ export default function InventoryPage() {
                       </>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               </div>
             ))}
           </div>

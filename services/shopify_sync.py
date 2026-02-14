@@ -420,6 +420,22 @@ def create_variants_for_bikes(
 # ---------------------------------------------------------------------------
 
 
+def delete_variants(product: dict, variant_ids: list[str]) -> None:
+    """Delete variants from a Shopify product."""
+    if not variant_ids or not product.get("shopify_product_id"):
+        return
+    data = _graphql_request(
+        DELETE_VARIANTS_MUTATION,
+        {
+            "productId": product["shopify_product_id"],
+            "variantsIds": variant_ids,
+        },
+    )
+    result = data.get("productVariantsBulkDelete", {})
+    if result.get("userErrors"):
+        logger.warning("Variant deletion had errors: %s", result["userErrors"])
+
+
 def archive_sold_variants(product_id: int) -> int:
     """Delete Shopify variants for sold bikes and clear local references.
 

@@ -800,3 +800,90 @@ class TestReconcile:
         assert "mismatches" in data
         assert "total_mismatches" in data
         assert data["total_mismatches"] == 0
+
+
+# ===========================================================================
+# Stock editing endpoints
+# ===========================================================================
+
+
+class TestUpdateBike:
+    def test_success(self, client, sample_bike) -> None:
+        resp = client.put(
+            f"/api/bikes/{sample_bike['id']}",
+            json={"actual_cost": 900.00, "notes": "Price adjusted"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["actual_cost"] == 900.00
+        assert data["notes"] == "Price adjusted"
+
+    def test_status_change(self, client, sample_bike) -> None:
+        resp = client.put(
+            f"/api/bikes/{sample_bike['id']}",
+            json={"status": "damaged"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "damaged"
+
+    def test_not_found(self, client) -> None:
+        resp = client.put("/api/bikes/9999", json={"notes": "test"})
+        assert resp.status_code == 404
+
+    def test_no_valid_fields(self, client, sample_bike) -> None:
+        resp = client.put(
+            f"/api/bikes/{sample_bike['id']}",
+            json={"invalid_field": "test"},
+        )
+        assert resp.status_code == 400
+
+    def test_empty_body(self, client, sample_bike) -> None:
+        resp = client.put(f"/api/bikes/{sample_bike['id']}", json={})
+        assert resp.status_code == 400
+
+
+class TestDeleteBike:
+    def test_success(self, client, sample_bike) -> None:
+        resp = client.delete(f"/api/bikes/{sample_bike['id']}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["message"] == "Bike deleted"
+
+        resp = client.get("/api/bikes")
+        assert resp.get_json() == []
+
+    def test_not_found(self, client) -> None:
+        resp = client.delete("/api/bikes/9999")
+        assert resp.status_code == 404
+
+    def test_with_shopify_variant(self, client, db, sample_product) -> None:
+        from database.models import create_bike, update_bike, update_product
+        bike = create_bike(db, serial_number="BIKE-00099", product_id=sample_product["id"], actual_cost=500.0)
+        update_bike(db, bike["id"], shopify_variant_id="gid://shopify/ProductVariant/123")
+        update_product(db, sample_product["id"], shopify_product_id="gid://shopify/Product/456")
+
+        with patch("services.shopify_sync.delete_variants") as mock_del:
+            resp = client.delete(f"/api/bikes/{bike['id']}")
+            assert resp.status_code == 200
+            mock_del.assert_called_once()
+
+
+class TestCascadeDeleteProduct:
+    def test_deletes_bikes(self, client, db, sample_bike, sample_product) -> None:
+        resp = client.get("/api/bikes")
+        assert len(resp.get_json()) == 1
+
+        resp = client.delete(f"/api/products/{sample_product['id']}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["message"] == "Product deleted"
+        assert data["bikes_deleted"] == 1
+
+        resp = client.get("/api/bikes")
+        assert resp.get_json() == []
+
+    def test_no_bikes(self, client, db, sample_product) -> None:
+        resp = client.delete(f"/api/products/{sample_product['id']}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["bikes_deleted"] == 0

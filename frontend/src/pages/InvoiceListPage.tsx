@@ -214,7 +214,7 @@ export default function InvoiceListPage() {
           <p>No invoices found.</p>
         </div>
       ) : (
-        <table>
+        <div className="table-responsive"><table>
           <thead>
             <tr>
               <th>Reference</th>
@@ -245,7 +245,7 @@ export default function InvoiceListPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );
