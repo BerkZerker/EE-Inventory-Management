@@ -636,6 +636,109 @@ class TestInventorySummary:
         assert isinstance(data, list)
 
 
+class TestManualBikeCreation:
+    def test_success(self, client, sample_product) -> None:
+        resp = client.post(
+            "/api/bikes/manual",
+            json={
+                "product_id": sample_product["id"],
+                "quantity": 3,
+                "cost_per_bike": 750.00,
+                "notes": "Floor models",
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["count"] == 3
+        assert len(data["bikes"]) == 3
+        # Verify serial numbers are sequential
+        serials = [b["serial_number"] for b in data["bikes"]]
+        assert serials == ["BIKE-00001", "BIKE-00002", "BIKE-00003"]
+        # Verify cost
+        for bike in data["bikes"]:
+            assert bike["actual_cost"] == 750.00
+
+    def test_missing_product_id(self, client) -> None:
+        resp = client.post(
+            "/api/bikes/manual",
+            json={"quantity": 1},
+        )
+        assert resp.status_code == 400
+        assert "product_id" in resp.get_json()["error"]
+
+    def test_invalid_quantity(self, client, sample_product) -> None:
+        resp = client.post(
+            "/api/bikes/manual",
+            json={"product_id": sample_product["id"], "quantity": 0},
+        )
+        assert resp.status_code == 400
+        assert "quantity" in resp.get_json()["error"]
+
+    def test_product_not_found(self, client) -> None:
+        resp = client.post(
+            "/api/bikes/manual",
+            json={"product_id": 9999, "quantity": 1},
+        )
+        assert resp.status_code == 404
+
+    def test_shopify_warning_on_failure(self, client, sample_product) -> None:
+        with patch(
+            "services.shopify_sync.ensure_shopify_product",
+            side_effect=RuntimeError("Shopify down"),
+        ):
+            resp = client.post(
+                "/api/bikes/manual",
+                json={
+                    "product_id": sample_product["id"],
+                    "quantity": 1,
+                    "cost_per_bike": 500.00,
+                },
+            )
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["count"] == 1
+        assert "shopify_warnings" in data
+
+
+class TestSerialCounter:
+    def test_get_counter(self, client) -> None:
+        resp = client.get("/api/serial-counter")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "next_serial" in data
+        assert "formatted" in data
+        assert data["next_serial"] == 1
+        assert data["formatted"] == "BIKE-00001"
+
+    def test_set_counter(self, client) -> None:
+        resp = client.put(
+            "/api/serial-counter",
+            json={"next_serial": 100},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["next_serial"] == 100
+        assert data["formatted"] == "BIKE-00100"
+
+        # Verify it persisted
+        resp = client.get("/api/serial-counter")
+        assert resp.get_json()["next_serial"] == 100
+
+    def test_set_counter_invalid(self, client) -> None:
+        resp = client.put(
+            "/api/serial-counter",
+            json={"next_serial": 0},
+        )
+        assert resp.status_code == 400
+
+    def test_set_counter_missing(self, client) -> None:
+        resp = client.put(
+            "/api/serial-counter",
+            json={},
+        )
+        assert resp.status_code == 400
+
+
 class TestProfitReport:
     def test_success(self, client) -> None:
         resp = client.get("/api/reports/profit?start=2024-01-01&end=2024-12-31")

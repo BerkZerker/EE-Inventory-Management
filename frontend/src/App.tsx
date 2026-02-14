@@ -2,11 +2,9 @@ import { Routes, Route, NavLink } from "react-router-dom";
 import "./App.css";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import DashboardPage from "@/pages/DashboardPage";
-import UploadPage from "@/pages/UploadPage";
 import InvoiceListPage from "@/pages/InvoiceListPage";
 import ReviewPage from "@/pages/ReviewPage";
 import InventoryPage from "@/pages/InventoryPage";
-import ProductsPage from "@/pages/ProductsPage";
 import ReportPage from "@/pages/ReportPage";
 
 function App() {
@@ -22,10 +20,8 @@ function App() {
             <NavLink to="/" end>
               Dashboard
             </NavLink>
-            <NavLink to="/upload">Upload Invoice</NavLink>
             <NavLink to="/invoices">Invoices</NavLink>
             <NavLink to="/inventory">Inventory</NavLink>
-            <NavLink to="/products">Products</NavLink>
             <NavLink to="/reports">Reports</NavLink>
           </nav>
         </aside>
@@ -33,11 +29,9 @@ function App() {
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={<DashboardPage />} />
-              <Route path="/upload" element={<UploadPage />} />
               <Route path="/invoices" element={<InvoiceListPage />} />
               <Route path="/invoices/:id" element={<ReviewPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/products" element={<ProductsPage />} />
               <Route path="/reports" element={<ReportPage />} />
             </Routes>
           </ErrorBoundary>

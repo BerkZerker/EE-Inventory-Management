@@ -61,12 +61,26 @@ class ParseError(Exception):
 # ---------------------------------------------------------------------------
 
 _PARSE_PROMPT = (
-    "Extract all invoice data from this PDF. "
-    "Return the supplier name, invoice number, invoice date (YYYY-MM-DD format), "
-    "each line item with brand (manufacturer), model name, color, size, quantity, "
-    "unit cost, and total cost, "
-    "plus shipping cost, discount, credit card fees, tax, other fees/surcharges, "
-    "and invoice total."
+    "Extract all invoice data from this PDF.\n"
+    "Return the supplier name, invoice number, invoice date (YYYY-MM-DD format).\n\n"
+    "For line items, ONLY extract bicycles and e-bikes. "
+    "IGNORE all accessories and parts including: fenders, racks, lights, locks, "
+    "helmets, bags, pumps, tools, spare parts, kickstands, bells, mirrors, "
+    "baskets, panniers, chargers, batteries sold separately, and similar accessories.\n"
+    "IGNORE wholesale/dealer price adjustment line items and credit/discount lines.\n\n"
+    "For each bike line item extract:\n"
+    "- brand: the manufacturer name (e.g., Trek, Specialized, Giant). "
+    "Do NOT include the brand in the model name.\n"
+    "- model: the model name WITHOUT the brand prefix "
+    "(e.g., 'Verve 3' not 'Trek Verve 3')\n"
+    "- color: the color if listed (e.g., Blue, Matte Black). Use null if not determinable.\n"
+    "- size: the frame size if listed (e.g., S, M, L, 48cm, 52cm, Small, Medium, Large). "
+    "Use null if not determinable.\n"
+    "- quantity: number of units\n"
+    "- unit_cost: cost per unit\n"
+    "- total_cost: total cost for this line\n\n"
+    "Also extract: shipping cost, discount, credit card fees, tax, "
+    "other fees/surcharges, and invoice total."
 )
 
 
@@ -197,6 +211,45 @@ def allocate_costs(
 
 _MODEL_MATCH_THRESHOLD = 3
 
+# Common abbreviations for normalization
+_ABBREVIATIONS: dict[str, str] = {
+    "sm": "small",
+    "med": "medium",
+    "md": "medium",
+    "lg": "large",
+    "xl": "extra large",
+    "xs": "extra small",
+    "blu": "blue",
+    "blk": "black",
+    "wht": "white",
+    "grn": "green",
+    "red": "red",
+    "gry": "gray",
+    "grey": "gray",
+    "slv": "silver",
+    "org": "orange",
+    "ylw": "yellow",
+    "pur": "purple",
+    "pnk": "pink",
+    "brn": "brown",
+}
+
+
+def _normalize(text: str) -> str:
+    """Normalize text by expanding abbreviations and lowering case."""
+    words = text.lower().split()
+    return " ".join(_ABBREVIATIONS.get(w, w) for w in words)
+
+
+def _token_overlap_score(a: str, b: str) -> float:
+    """Return the fraction of tokens in common between two strings (0.0-1.0)."""
+    tokens_a = set(a.lower().split())
+    tokens_b = set(b.lower().split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    overlap = tokens_a & tokens_b
+    return len(overlap) / max(len(tokens_a), len(tokens_b))
+
 
 def match_to_catalog(
     item: ParsedInvoiceItem,
@@ -205,11 +258,12 @@ def match_to_catalog(
     """Score each catalog product against the parsed item and return best match.
 
     Scoring:
-      - Brand exact match (case-insensitive): +3
-      - Model exact match (case-insensitive): +5
+      - Brand exact match (case-insensitive, normalized): +3
+      - Model exact match (case-insensitive, normalized): +5
       - Model substring match (case-insensitive): +3  (required minimum)
-      - Color match (case-insensitive): +2
-      - Size match (case-insensitive): +2
+      - Model token overlap >= 0.5: +3 (alternative to substring)
+      - Color match (case-insensitive, normalized): +2
+      - Size match (case-insensitive, normalized): +2
 
     Returns the product id of the highest-scoring match, or None if no match
     reaches the threshold (3).
@@ -217,39 +271,41 @@ def match_to_catalog(
     best_id: int | None = None
     best_score = 0
 
-    item_brand = (item.brand or "").lower()
-    item_model = item.model.lower()
-    item_color = (item.color or "").lower()
-    item_size = (item.size or "").lower()
+    item_brand = _normalize(item.brand or "")
+    item_model = _normalize(item.model)
+    item_color = _normalize(item.color or "")
+    item_size = _normalize(item.size or "")
 
     for product in catalog:
         score = 0
-        product_model = (product.get("model") or "").lower()
+        product_model = _normalize(product.get("model") or "")
 
         if not product_model:
             continue
 
-        # Model matching — exact or substring
+        # Model matching — exact, substring, or token overlap
         if item_model == product_model:
             score += 5
         elif item_model in product_model or product_model in item_model:
+            score += 3
+        elif _token_overlap_score(item_model, product_model) >= 0.5:
             score += 3
         else:
             # No model match at all — skip this product
             continue
 
         # Brand match
-        product_brand = (product.get("brand") or "").lower()
+        product_brand = _normalize(product.get("brand") or "")
         if item_brand and product_brand and item_brand == product_brand:
             score += 3
 
         # Color match
-        product_color = (product.get("color") or "").lower()
+        product_color = _normalize(product.get("color") or "")
         if item_color and product_color and item_color == product_color:
             score += 2
 
         # Size match
-        product_size = (product.get("size") or "").lower()
+        product_size = _normalize(product.get("size") or "")
         if item_size and product_size and item_size == product_size:
             score += 2
 

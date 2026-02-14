@@ -81,6 +81,30 @@ mutation DeleteVariants($productId: ID!, $variantsIds: [ID!]!) {
 }
 """
 
+PUBLICATIONS_QUERY = """
+query {
+  publications(first: 20) {
+    edges {
+      node {
+        id
+        name
+      }
+    }
+  }
+}
+"""
+
+PUBLISHABLE_PUBLISH_MUTATION = """
+mutation PublishablePublish($id: ID!, $input: [PublicationInput!]!) {
+  publishablePublish(id: $id, input: $input) {
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
 RECONCILE_VARIANTS_QUERY = """
 query GetProductVariants($id: ID!) {
   product(id: $id) {

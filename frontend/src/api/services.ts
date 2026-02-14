@@ -28,6 +28,14 @@ export const invoiceApi = {
 export const bikeApi = {
   list: (params?: Record<string, string>) => apiClient.get<Bike[]>("/bikes", { params }),
   summary: () => apiClient.get<InventorySummary[]>("/inventory/summary"),
+  createManual: (data: { product_id: number; quantity: number; cost_per_bike?: number; notes?: string }) =>
+    apiClient.post<{ bikes: Bike[]; count: number; shopify_warnings?: string[] }>("/bikes/manual", data),
+};
+
+export const serialApi = {
+  get: () => apiClient.get<{ next_serial: number; formatted: string }>("/serial-counter"),
+  set: (next_serial: number) =>
+    apiClient.put<{ next_serial: number; formatted: string }>("/serial-counter", { next_serial }),
 };
 
 export const reportApi = {

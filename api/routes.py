@@ -462,6 +462,103 @@ def inventory_summary() -> tuple:
     return jsonify(summary), 200
 
 
+@api_bp.route("/bikes/manual", methods=["POST"])
+@handle_errors
+def create_manual_bikes() -> tuple:
+    """Create bikes outside the invoice flow."""
+    data = request.get_json()
+    if not data:
+        return error_response("Request body must be JSON", 400)
+
+    product_id = data.get("product_id")
+    quantity = data.get("quantity")
+
+    if not product_id:
+        return error_response("Missing required field: product_id", 400)
+    if not quantity or int(quantity) < 1:
+        return error_response("quantity must be at least 1", 400)
+
+    quantity = int(quantity)
+    cost_per_bike = float(data.get("cost_per_bike", 0))
+    notes = data.get("notes")
+
+    product = models.get_product(g.db, product_id)
+    if product is None:
+        return error_response("Product not found", 404)
+
+    # Generate serial numbers
+    from services.serial_generator import generate_serial_numbers
+    serials = generate_serial_numbers(quantity, conn=g.db)
+
+    # Create bike records
+    bike_dicts = [
+        {
+            "serial_number": serial,
+            "product_id": product_id,
+            "actual_cost": cost_per_bike,
+            "notes": notes,
+        }
+        for serial in serials
+    ]
+    bikes = models.create_bikes_bulk(g.db, bike_dicts)
+
+    # Push to Shopify
+    shopify_warnings = []
+    try:
+        from services.shopify_sync import create_variants_for_bikes, ensure_shopify_product
+
+        if not product.get("shopify_product_id"):
+            ensure_shopify_product(g.db, product)
+            product = models.get_product(g.db, product_id)
+
+        if product and product.get("shopify_product_id"):
+            create_variants_for_bikes(bikes, product, conn=g.db)
+    except Exception as exc:
+        logger.warning("Shopify sync failed for manual bikes: %s", exc, exc_info=True)
+        shopify_warnings.append(f"Shopify sync failed: {exc}")
+
+    result = {"bikes": bikes, "count": len(bikes)}
+    if shopify_warnings:
+        result["shopify_warnings"] = shopify_warnings
+    return jsonify(result), 201
+
+
+@api_bp.route("/serial-counter", methods=["GET"])
+@handle_errors
+def get_serial_counter() -> tuple:
+    """Return the current serial counter value."""
+    next_serial = models.get_next_serial(g.db)
+    prefix = settings.serial_prefix
+    return jsonify({
+        "next_serial": next_serial,
+        "formatted": f"{prefix}-{next_serial:05d}",
+    }), 200
+
+
+@api_bp.route("/serial-counter", methods=["PUT"])
+@handle_errors
+def set_serial_counter() -> tuple:
+    """Set the serial counter to a specific value."""
+    data = request.get_json()
+    if not data or "next_serial" not in data:
+        return error_response("Missing required field: next_serial", 400)
+
+    try:
+        value = int(data["next_serial"])
+    except (TypeError, ValueError):
+        return error_response("next_serial must be an integer", 400)
+
+    if value < 1:
+        return error_response("next_serial must be at least 1", 400)
+
+    models.set_serial_counter(g.db, value)
+    prefix = settings.serial_prefix
+    return jsonify({
+        "next_serial": value,
+        "formatted": f"{prefix}-{value:05d}",
+    }), 200
+
+
 @api_bp.route("/reports/profit", methods=["GET"])
 @handle_errors
 def profit_report() -> tuple:

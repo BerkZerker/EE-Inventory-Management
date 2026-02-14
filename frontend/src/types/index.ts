@@ -80,6 +80,8 @@ export interface InventorySummary {
   sku: string;
   brand: string;
   model: string;
+  color: string | null;
+  size: string | null;
   retail_price: number;
   total_bikes: number;
   available: number;

@@ -698,6 +698,16 @@ def increment_serial_counter(conn: sqlite3.Connection, count: int = 1) -> int:
     return start
 
 
+def set_serial_counter(conn: sqlite3.Connection, value: int) -> int:
+    """Set the serial counter to a specific value. Returns the new value."""
+    conn.execute(
+        "UPDATE serial_counter SET next_serial = ? WHERE id = 1",
+        (value,),
+    )
+    conn.commit()
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Webhook Log
 # ---------------------------------------------------------------------------
@@ -758,6 +768,8 @@ def get_inventory_summary(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 p.sku,
                 p.brand,
                 p.model,
+                p.color,
+                p.size,
                 p.retail_price,
                 COUNT(b.id)                                     AS total_bikes,
                 SUM(CASE WHEN b.status = 'available' THEN 1 ELSE 0 END)

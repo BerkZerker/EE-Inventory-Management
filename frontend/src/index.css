@@ -33,10 +33,13 @@ a:hover {
 
 h1,
 h2,
-h3 {
+h3,
+h4 {
   margin-top: 0;
+  color: #1e293b;
 }
 
+/* --- Buttons --- */
 button {
   border-radius: 6px;
   border: 1px solid #d1d5db;
@@ -84,6 +87,12 @@ button.success:hover {
   background-color: #15803d;
 }
 
+button.sm {
+  padding: 0.3em 0.7em;
+  font-size: 0.8rem;
+}
+
+/* --- Inputs --- */
 input,
 select,
 textarea {
@@ -94,15 +103,20 @@ textarea {
   border-radius: 6px;
   background: #fff;
   color: #213547;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid #2563eb;
-  outline-offset: -1px;
+  outline: none;
   border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+input::placeholder {
+  color: #9ca3af;
 }
 
+/* --- Tables --- */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -110,9 +124,10 @@ table {
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
 }
 thead {
-  background: #f9fafb;
+  background: #f8fafc;
 }
 th,
 td {
@@ -127,6 +142,12 @@ th {
   letter-spacing: 0.05em;
   color: #6b7280;
 }
+tbody tr {
+  transition: background 0.1s;
+}
 tbody tr:hover {
-  background: #f9fafb;
+  background: #f8fafc;
+}
+tbody tr:last-child td {
+  border-bottom: none;
 }

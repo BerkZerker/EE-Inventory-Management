@@ -1,16 +1,18 @@
 # TODO
 
-- Products need to show up in POINT OF SALE sales channel in Shopify.
+## Completed
 
-- Figure out how barcodes (creation) & scanning (ringing up) will work. I want to be able to just scan the bike and have it ring up in the POS, but I also want to be able to manually enter the bike # if needed.
+## In Progress
 
-- Set up a way to enter current inventory manually so I can get the app up and running with our current stock. This could be a simple form where I can enter the bike #, brand, model, variant, and quantity for each bike we have in stock. I also need to be able to set what bike # we are currently at, instead of starting from 0.
+- Barcodes: creation is done (Code128 labels via barcode_generator.py, Avery 5160 sheets + thermal labels). **Still needed:** scanning/ringing up workflow — ability to scan a barcode or manually enter a bike # to look it up and ring it up in Shopify POS.
 
-- Make the UI cleaner - I want to be able to just see the brands and the bikes, and how many for each variant. I don't need to see the sku, just our cost, wholesale, & bike #.
+- UI cleanup: Inventory page groups by Brand > Model > Variants with collapsible rows, shows cost/retail/bike#. **Still needed:** hide SKU on Products page, add wholesale price display.
 
-- The parsing needs to get cleaned up - I just want to autofill the brand, model, and variant from the title. Stuff about fenders, wholesale, and such can be ignored.
+- Overall UI clarity: modern sidebar layout, status badges, card-based design in place. **Still needed:** mobile responsiveness, better visual hierarchy.
 
-- Overall work on UI to make it more clear and easy to understand & use.
+## Not Started
+
+- Figure out barcode scanning/POS ringing up workflow. Want to scan the bike barcode and have it ring up in POS, or manually enter bike # if needed.
 
 ## Future Features
 

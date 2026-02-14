@@ -28,12 +28,15 @@ from services.shopify_queries import (
     DELETE_VARIANTS_MUTATION,
     GET_PRODUCT_VARIANTS_QUERY,
     LOCATIONS_QUERY,
+    PUBLICATIONS_QUERY,
+    PUBLISHABLE_PUBLISH_MUTATION,
     SEARCH_PRODUCTS_QUERY,
 )
 
 logger = logging.getLogger(__name__)
 
 _cached_location_id: str | None = None
+_cached_publication_ids: list[str] | None = None
 
 # Rate-limit back-off thresholds
 RATE_LIMIT_AVAILABLE_THRESHOLD = 100
@@ -226,11 +229,48 @@ def ensure_shopify_product(conn, product: dict) -> str | None:
         shopify_pid = result["product"]["id"]
         for s in siblings:
             models.update_product(conn, s["id"], shopify_product_id=shopify_pid)
+
+        # Publish to all sales channels (POS, Online Store, etc.)
+        publish_to_all_channels(shopify_pid)
+
         return shopify_pid
     except ShopifySyncError:
         raise
     except Exception as exc:
         raise ShopifySyncError(f"Failed to create Shopify product '{title}'") from exc
+
+
+def publish_to_all_channels(product_gid: str) -> None:
+    """Publish a product to all sales channels (Online Store + POS).
+
+    Queries available publications and publishes the product to each one.
+    Failures are logged as warnings but do not raise exceptions.
+    """
+    global _cached_publication_ids  # noqa: PLW0603
+
+    try:
+        if _cached_publication_ids is None:
+            data = _graphql_request(PUBLICATIONS_QUERY)
+            _cached_publication_ids = [
+                edge["node"]["id"] for edge in data["publications"]["edges"]
+            ]
+
+        if not _cached_publication_ids:
+            logger.warning("No publications found — skipping channel publish")
+            return
+
+        pub_input = [{"publicationId": pid} for pid in _cached_publication_ids]
+        data = _graphql_request(
+            PUBLISHABLE_PUBLISH_MUTATION,
+            {"id": product_gid, "input": pub_input},
+        )
+        errors = data["publishablePublish"]["userErrors"]
+        if errors:
+            logger.warning("Publish to channels had errors: %s", errors)
+    except Exception:
+        logger.warning(
+            "Failed to publish %s to sales channels", product_gid, exc_info=True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +367,7 @@ def create_variants_for_bikes(
                     {"optionName": "Serial", "name": bike["serial_number"]},
                 ],
                 "price": str(product["retail_price"]),
+                "barcode": bike["serial_number"].replace("BIKE-", ""),
                 "inventoryItem": {
                     "cost": bike["actual_cost"],
                     "sku": bike["serial_number"],

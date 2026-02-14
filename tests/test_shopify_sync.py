@@ -22,6 +22,7 @@ from services.shopify_sync import (
     archive_sold_variants,
     create_variants_for_bikes,
     ensure_shopify_product,
+    publish_to_all_channels,
 )
 from tests.conftest import _NoCloseConnection
 
@@ -70,6 +71,12 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 def _reset_location_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the module-level location cache before each test."""
     monkeypatch.setattr("services.shopify_sync._cached_location_id", None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_publication_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the module-level publication cache before each test."""
+    monkeypatch.setattr("services.shopify_sync._cached_publication_ids", None)
 
 
 @pytest.fixture
@@ -213,10 +220,36 @@ class TestEnsureShopifyProduct:
             },
             status=200,
         )
+        # publish_to_all_channels: publications query
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "publications": {
+                        "edges": [
+                            {"node": {"id": "gid://shopify/Publication/1", "name": "Online Store"}},
+                        ]
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        # publish_to_all_channels: publish mutation
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {"publishablePublish": {"userErrors": []}},
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
 
         result = ensure_shopify_product(db, product)
         assert result == "gid://shopify/Product/99"
-        assert len(responses.calls) == 2
+        assert len(responses.calls) == 4  # search + create + publications + publish
 
     @responses.activate
     @pytest.mark.usefixtures("_patch_db")
@@ -389,6 +422,9 @@ class TestCreateVariantsForBikes:
         assert len(option_values) == 3
         names = {ov["optionName"] for ov in option_values}
         assert names == {"Color", "Size", "Serial"}
+
+        # Verify barcode is set to numeric-only serial
+        assert variant_input["barcode"] == "001"
 
         # Verify inventoryQuantities uses InventoryLevelInput format
         inv_qty = variant_input["inventoryQuantities"][0]
@@ -587,3 +623,116 @@ class TestArchiveSoldVariants:
             "gid://shopify/ProductVariant/100",
             "gid://shopify/ProductVariant/101",
         }
+
+
+# =========================================================================
+# TestPublishToAllChannels
+# =========================================================================
+
+
+class TestPublishToAllChannels:
+    @responses.activate
+    def test_publishes_to_all_channels(self) -> None:
+        """Product should be published to all available publications."""
+        # Publications query
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "publications": {
+                        "edges": [
+                            {"node": {"id": "gid://shopify/Publication/1", "name": "Online Store"}},
+                            {"node": {"id": "gid://shopify/Publication/2", "name": "Point of Sale"}},
+                        ]
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        # Publish mutation
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "publishablePublish": {
+                        "userErrors": [],
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+
+        publish_to_all_channels("gid://shopify/Product/1")
+
+        assert len(responses.calls) == 2
+        # Verify publish mutation was called with correct input
+        request_body = json.loads(responses.calls[1].request.body)
+        assert request_body["variables"]["id"] == "gid://shopify/Product/1"
+        pub_input = request_body["variables"]["input"]
+        assert len(pub_input) == 2
+        assert {"publicationId": "gid://shopify/Publication/1"} in pub_input
+        assert {"publicationId": "gid://shopify/Publication/2"} in pub_input
+
+    @responses.activate
+    def test_caches_publication_ids(self) -> None:
+        """Publication IDs should be cached after first query."""
+        # First call: query + publish
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {
+                    "publications": {
+                        "edges": [
+                            {"node": {"id": "gid://shopify/Publication/1", "name": "Online Store"}},
+                        ]
+                    }
+                },
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {"publishablePublish": {"userErrors": []}},
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+        # Second call: only publish (no query)
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "data": {"publishablePublish": {"userErrors": []}},
+                "extensions": _good_extensions(),
+            },
+            status=200,
+        )
+
+        publish_to_all_channels("gid://shopify/Product/1")
+        publish_to_all_channels("gid://shopify/Product/2")
+
+        # 3 calls total: 1 publications query + 2 publish mutations
+        assert len(responses.calls) == 3
+
+    @responses.activate
+    def test_failure_does_not_raise(self) -> None:
+        """Publishing failures should be logged but not raise."""
+        responses.add(
+            responses.POST,
+            SHOPIFY_GRAPHQL_URL,
+            json={
+                "errors": [{"message": "Access denied"}],
+            },
+            status=200,
+        )
+
+        # Should not raise
+        publish_to_all_channels("gid://shopify/Product/1")

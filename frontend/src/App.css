@@ -73,6 +73,7 @@
 .page-header h2 {
   font-size: 1.5rem;
   margin: 0;
+  color: #1e293b;
 }
 .page-header p {
   color: #6b7280;
@@ -86,6 +87,7 @@
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   padding: 1.25rem;
+  border: 1px solid #e5e7eb;
 }
 
 .stats-grid {
@@ -100,6 +102,13 @@
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   padding: 1rem 1.25rem;
+  border: 1px solid #e5e7eb;
+  transition: all 0.15s;
+}
+.stat-card-link:hover {
+  border-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+  transform: translateY(-1px);
 }
 .stat-card .label {
   font-size: 0.75rem;
@@ -122,6 +131,7 @@
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
+  letter-spacing: 0.02em;
 }
 .badge.available {
   background: #dcfce7;
@@ -204,7 +214,7 @@
   color: #9ca3af;
 }
 
-/* --- Loading / Error --- */
+/* --- Loading / Error / Success --- */
 .loading {
   text-align: center;
   padding: 2rem;
@@ -218,12 +228,27 @@
   border-radius: 6px;
   margin-bottom: 1rem;
   font-size: 0.875rem;
+  border: 1px solid #fecaca;
+}
+
+.success-message {
+  background: #dcfce7;
+  color: #166534;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  border: 1px solid #bbf7d0;
 }
 
 .empty-state {
   text-align: center;
   padding: 3rem 2rem;
   color: #6b7280;
+}
+.empty-state p {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
 }
 
 /* --- Actions bar --- */
@@ -273,10 +298,53 @@
   margin-bottom: 1rem;
 }
 
+/* --- Inventory table fixed columns --- */
+.inventory-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
 /* --- Editable stat card --- */
 .stat-card input[type="number"] {
   font-size: 1.25rem;
   font-weight: 700;
   width: 100%;
   padding: 0.25em 0.5em;
+}
+
+/* --- Cost breakdown (invoice review) --- */
+.cost-breakdown {
+  max-width: 320px;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+}
+.cost-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0;
+}
+.cost-label {
+  color: #6b7280;
+}
+.cost-amount {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cost-separator {
+  border-top: 1px solid #d1d5db;
+  margin: 0.35rem 0;
+}
+.cost-total {
+  font-weight: 700;
+}
+.cost-total .cost-label,
+.cost-total .cost-amount {
+  color: #1e293b;
+}
+.cost-inline-input {
+  width: 5.5rem;
+  text-align: right;
+  font-size: 0.9rem;
+  padding: 0.15em 0.35em;
 }

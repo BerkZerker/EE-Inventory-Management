@@ -27,15 +27,12 @@ export default function ReviewPage() {
     commitEditCost,
   } = useInvoiceReview();
 
-  if (loading) return <div className="loading">Loading invoice...</div>;
-  if (!invoice) return <div className="error-message">Invoice not found.</div>;
-
-  const isPending = invoice.status === "pending";
+  const isPending = invoice?.status === "pending";
 
   // Compute live preview of allocated cost per unit for pending invoices
   const previewAllocated = useMemo(() => {
     const map = new Map<number, number>();
-    if (isPending && invoice.items && invoice.items.length > 0) {
+    if (isPending && invoice?.items && invoice.items.length > 0) {
       const totalBikes = invoice.items.reduce((sum, it) => sum + it.quantity, 0);
       if (totalBikes > 0) {
         const totalExtras =
@@ -55,6 +52,9 @@ export default function ReviewPage() {
     }
     return map;
   }, [invoice, isPending]);
+
+  if (loading) return <div className="loading">Loading invoice...</div>;
+  if (!invoice) return <div className="error-message">Invoice not found.</div>;
 
   return (
     <div>

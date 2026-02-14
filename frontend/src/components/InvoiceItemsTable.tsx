@@ -25,14 +25,22 @@ export default function InvoiceItemsTable({
           <th>Product</th>
           <th>Qty</th>
           <th>Unit Cost</th>
-          <th>Total Cost</th>
-          <th>Allocated</th>
+          <th>Final Cost</th>
         </tr>
       </thead>
       <tbody>
         {items.map((item) => (
           <tr key={item.id}>
-            <td>{item.description}</td>
+            <td>
+              <div>{item.description}</div>
+              {(item.parsed_brand || item.parsed_model || item.parsed_color || item.parsed_size) && (
+                <div style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.25rem" }}>
+                  {[item.parsed_brand, item.parsed_model, item.parsed_color, item.parsed_size]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              )}
+            </td>
             <td>
               {isPending ? (
                 <select
@@ -84,7 +92,6 @@ export default function InvoiceItemsTable({
                 `$${item.unit_cost.toFixed(2)}`
               )}
             </td>
-            <td>${item.total_cost.toFixed(2)}</td>
             <td>
               {item.allocated_cost != null
                 ? `$${item.allocated_cost.toFixed(2)}`

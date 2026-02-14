@@ -1,11 +1,11 @@
 import type { Invoice } from "@/types";
 
-const COST_FIELDS: { key: string; label: string }[] = [
-  { key: "shipping_cost", label: "Shipping" },
-  { key: "discount", label: "Discount" },
-  { key: "credit_card_fees", label: "CC Fees" },
-  { key: "tax", label: "Tax" },
-  { key: "other_fees", label: "Other Fees" },
+const COST_FIELDS: { key: string; label: string; op: "+" | "-" }[] = [
+  { key: "shipping_cost", label: "Shipping", op: "+" },
+  { key: "credit_card_fees", label: "CC Fees", op: "+" },
+  { key: "tax", label: "Tax", op: "+" },
+  { key: "other_fees", label: "Other Fees", op: "+" },
+  { key: "discount", label: "Discount", op: "-" },
 ];
 
 function getInvoiceCostValue(invoice: Invoice, key: string): number {
@@ -36,21 +36,34 @@ export default function CostFields({
   onEditChange,
   onEditCommit,
 }: Props) {
+  const itemSubtotal = (invoice.items ?? []).reduce(
+    (sum, item) => sum + item.unit_cost * item.quantity,
+    0,
+  );
+
+  const grandTotal =
+    itemSubtotal +
+    (invoice.shipping_cost ?? 0) +
+    (invoice.credit_card_fees ?? 0) +
+    (invoice.tax ?? 0) +
+    (invoice.other_fees ?? 0) -
+    (invoice.discount ?? 0);
+
   return (
-    <div className="stats-grid">
-      <div className="stat-card">
-        <div className="label">Total</div>
-        <div className="value">
-          ${invoice.total_amount?.toFixed(2) ?? "N/A"}
-        </div>
+    <div className="cost-breakdown">
+      <div className="cost-line">
+        <span className="cost-label">Subtotal</span>
+        <span className="cost-amount">${itemSubtotal.toFixed(2)}</span>
       </div>
-      {COST_FIELDS.map(({ key, label }) => {
+      {COST_FIELDS.map(({ key, label, op }) => {
         const fieldValue = getInvoiceCostValue(invoice, key);
         const isEditing = key in editingCosts;
         return (
-          <div className="stat-card" key={key}>
-            <div className="label">{label}</div>
-            <div className="value">
+          <div className="cost-line" key={key}>
+            <span className="cost-label">
+              {op === "+" ? "+" : "\u2212"} {label}
+            </span>
+            <span className="cost-amount">
               {isPending ? (
                 isEditing ? (
                   <input
@@ -65,6 +78,7 @@ export default function CostFields({
                       }
                     }}
                     autoFocus
+                    className="cost-inline-input"
                   />
                 ) : (
                   <span
@@ -78,10 +92,15 @@ export default function CostFields({
               ) : (
                 `$${(fieldValue ?? 0).toFixed(2)}`
               )}
-            </div>
+            </span>
           </div>
         );
       })}
+      <div className="cost-separator" />
+      <div className="cost-line cost-total">
+        <span className="cost-label">Total</span>
+        <span className="cost-amount">${grandTotal.toFixed(2)}</span>
+      </div>
     </div>
   );
 }

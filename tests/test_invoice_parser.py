@@ -11,6 +11,8 @@ from services.invoice_parser import (
     ParsedInvoice,
     ParsedInvoiceItem,
     ParseError,
+    _normalize,
+    _token_overlap_score,
     allocate_costs,
     match_to_catalog,
     parse_invoice_pdf,
